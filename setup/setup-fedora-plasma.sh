@@ -4,7 +4,7 @@
 #
 # Script de configuración inicial para Fedora Workstation / KDE Plasma spin.
 # Deja el equipo listo con drivers multimedia, códecs por hardware (AMD/NVIDIA),
-# microcódigo de CPU, Brave, Flathub y (opcionalmente) herramientas ASUS ROG.
+# microcódigo de CPU, Flathub y (opcionalmente) herramientas ASUS ROG.
 #
 # Uso:
 #   chmod +x setup-fedora-plasma.sh
@@ -61,11 +61,26 @@ pkg_installed() {
     rpm -q "$1" &>/dev/null
 }
 
+configure_dnf_performance() {
+    local dnf_conf="/etc/dnf/dnf.conf"
+    if ! grep -q '^max_parallel_downloads=' "$dnf_conf" 2>/dev/null; then
+        {
+            echo "max_parallel_downloads=10"
+            echo "fastestmirror=True"
+        } | sudo tee -a "$dnf_conf" >/dev/null
+        log_ok "dnf configurado para descargas más rápidas (max_parallel_downloads=10, fastestmirror=True)"
+    else
+        log_ok "dnf ya tenía configuración de descargas paralelas"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # 1. Base del sistema
 # ---------------------------------------------------------------------------
 step_base_update() {
     log_step "1/8 · Actualizando el sistema e instalando paquetes base"
+
+    configure_dnf_performance
 
     sudo dnf update --refresh -y
     sudo dnf upgrade -y
@@ -194,7 +209,9 @@ step_gpu_drivers() {
         log_warn "que este script NO hace por vos — está documentado en MANUAL.md."
         if ask_yes_no "¿Instalar el driver propietario NVIDIA (akmod-nvidia)?"; then
             sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
-            log_ok "akmod-nvidia instalado. El módulo se compila en segundo plano; se recomienda reiniciar."
+            log_info "Compilando el módulo de kernel de NVIDIA (esto puede tardar unos minutos)..."
+            sudo akmods --force --kernels "$(uname -r)"
+            log_ok "akmod-nvidia instalado y módulo compilado. Se recomienda reiniciar."
         else
             log_info "Se omite la instalación de akmod-nvidia (podés instalarlo más tarde manualmente)"
         fi
@@ -202,17 +219,10 @@ step_gpu_drivers() {
 }
 
 # ---------------------------------------------------------------------------
-# 5. Brave + swappiness
+# 5. Swappiness
 # ---------------------------------------------------------------------------
 step_brave_and_swappiness() {
-    log_step "5/8 · Instalando Brave y ajustando swappiness"
-
-    if command -v brave-browser &>/dev/null; then
-        log_ok "Brave ya está instalado"
-    else
-        curl -fsS https://dl.brave.com/install.sh | sh
-        log_ok "Brave instalado (flavor origin)"
-    fi
+    log_step "5/8 · Ajustando swappiness"
 
     local sysctl_file="/etc/sysctl.d/99-swappiness.conf"
     echo "vm.swappiness=150" | sudo tee "$sysctl_file" >/dev/null
@@ -281,15 +291,13 @@ step_asus_tools() {
         log_ok "ROG Control Center instalado"
     fi
 
-    echo
-    log_warn "Cardwire (reemplazo de supergfxd para gráficos híbridos) es EXPERIMENTAL"
-    log_warn "todavía tiene 'rough edges' según sus propios desarrolladores."
-    if ask_yes_no "¿Instalar Cardwire de todas formas?"; then
-        sudo dnf install -y cardwire
-        log_ok "Cardwire instalado (recordá que es experimental)"
-    else
-        log_info "Se omite Cardwire"
-    fi
+    # NOTA: Cardwire (reemplazo experimental de supergfxd) se removió
+    # deliberadamente de este script. Sigue en beta ("rough edges" según sus
+    # propios desarrolladores, soporte solo por Discord) y en algunos casos
+    # entra en conflicto con paquetes como switcheroo-control. Quien quiera
+    # instalarlo lo hace aparte, bajo su propio criterio, siguiendo las
+    # instrucciones oficiales del proyecto:
+    #   https://github.com/OpenGamingCollective/cardwire/releases
 }
 
 # ---------------------------------------------------------------------------
@@ -302,6 +310,8 @@ step_summary() {
     echo "  - Reiniciá el equipo, sobre todo si instalaste akmod-nvidia."
     echo "  - Si tenés Secure Boot activado y usaste akmod-nvidia, revisá MANUAL.md"
     echo "    para el paso de MOK enrollment (obligatorio, se hace en el próximo arranque)."
+    echo "  - Cardwire no se instala desde este script (sigue en beta). Si lo querés,"
+    echo "    instalalo aparte siguiendo las instrucciones oficiales del proyecto."
     echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
 }
 
