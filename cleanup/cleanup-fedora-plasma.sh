@@ -55,7 +55,29 @@ PACKAGES_TO_REMOVE=(
     "krfb|krfb (Compartir escritorio - servidor)"
     "krdc|krdc (Cliente de escritorio remoto)"
     "neochat|NeoChat (cliente de Matrix)"
+
+    # --- Añadidas en segunda ronda de limpieza ---
+    "orca|Orca (lector de pantalla)"
+    "kleopatra|Kleopatra (gestor de certificados GPG/S-MIME, arrastra Akonadi/MariaDB)"
+    "akonadi-server|Akonadi (motor PIM, dependencia de Kleopatra)"
+    "akonadi-mime|Akonadi Mime"
+    "kcharselect|KCharSelect (selector de caracteres especiales)"
+    "ibus|ibus (selector de método de entrada)"
+    "ksystemlog|KSystemLog (visor de registro)"
+    "kde-partitionmanager|Gestor de particiones KDE"
+    "plasma-drkonqi|DrKonqi (informe de fallos de Plasma)"
+    "akregator|Akregator (lector de RSS)"
+    "kdeconnectd|KDE Connect (integración con el móvil)"
+    "kolourpaint|KolourPaint (editor de imágenes básico)"
+    "qrca|Qrca (escáner de códigos de barras/QR)"
+    "gnome-abrt|GNOME ABRT (informe de problemas del sistema)"
 )
+
+# NOTA: al quitar kleopatra/akonadi-server, dnf arrastra como dependientes
+# korganizer, incidenceeditor y el paquete completo kde-connect (no solo el
+# daemon). Es intencional: libera ~450 MiB adicionales de la pila PIM/MariaDB.
+# Si quieres conservar el calendario o KDE Connect, reinstálalos después con:
+#   sudo dnf install kde-connect korganizer
 
 main() {
     log_info "Revisando ${#PACKAGES_TO_REMOVE[@]} aplicaciones candidatas a eliminar..."
