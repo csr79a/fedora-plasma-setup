@@ -1,54 +1,47 @@
 # fedora-plasma-setup
 
-Script de configuración inicial para **Fedora Workstation / KDE Plasma spin**, pensado para dejar el equipo casi listo tras una instalación limpia: descargas dnf más rápidas, drivers multimedia, códecs por hardware (AMD/NVIDIA), microcódigo de CPU, Flathub y, si corresponde, herramientas ASUS ROG (asusctl).
-
-Compañero de [`debian-trixie-setup`](https://github.com/csr79a/debian-trixie-setup), mismo enfoque adaptado a Fedora.
+Colección de scripts para preparar **Fedora Workstation / KDE Plasma**, manteniendo separadas la configuración general del sistema y la configuración específica para gaming.
 
 ## Estructura
 
 ```
 fedora-plasma-setup/
-├── setup/
-│   └── setup-fedora-plasma.sh     # Script principal de instalación
-├── cleanup/
-│   └── cleanup-fedora-plasma.sh   # Elimina apps de KDE no usadas (opcional, aparte)
+├── plasma/
+│   ├── setup-fedora-plasma.sh
+│   └── cleanup-fedora-plasma.sh
+├── gaming/
+│   └── setup-gaming-fedora.sh
 ├── README.md
-└── MANUAL.md                      # Explicación detallada, paso a paso, y Secure Boot
+└── MANUAL.md
 ```
 
-## Qué hace `setup-fedora-plasma.sh`
+## Plasma
 
-1. Configura dnf para descargas paralelas más rápidas (`max_parallel_downloads`, `fastestmirror`), actualiza el sistema e instala paquetes base (fastfetch, unrar, p7zip, papirus-icon-theme)
-2. Habilita RPM Fusion (free + nonfree) y configura multimedia completo (swap de ffmpeg, grupo Multimedia)
-3. Detecta la CPU (Intel/AMD) e instala el microcódigo correspondiente, automáticamente
-4. Detecta la GPU (AMD/NVIDIA) e instala los códecs VAAPI correspondientes, automáticamente; si hay NVIDIA, **pregunta** si instalar el driver propietario (akmod-nvidia) y **espera** a que termine de compilar antes de seguir
-5. Ajusta `vm.swappiness=150`
-6. Configura Flatpak para usar solo Flathub (elimina el remoto propio de Fedora)
-7. Si detecta hardware ASUS, **pregunta** si instalar asusctl (repo Terra) y ROG Control Center. Cardwire **no** se instala desde este script (ver nota abajo)
-8. Muestra un resumen final con recomendaciones
+`plasma/setup-fedora-plasma.sh` realiza la configuración inicial de Fedora KDE Plasma: DNF, actualización del sistema, RPM Fusion, multimedia, microcódigo, códecs, NVIDIA opcional, swappiness, Flatpak/Flathub y herramientas ASUS cuando corresponde.
 
-El script es **idempotente**: se puede correr varias veces sin romper nada, y **no requiere hardware específico** — los bloques de NVIDIA y ASUS se saltan solos si no aplican.
+`plasma/cleanup-fedora-plasma.sh` es independiente y elimina, previa confirmación, aplicaciones de KDE que no se quieran conservar.
 
-### Nota sobre Cardwire
+## Gaming
 
-Cardwire (reemplazo experimental de `supergfxd` para gráficos híbridos) se removió deliberadamente del script: sigue en beta ("rough edges" según sus propios desarrolladores, soporte solo por Discord) y en algunos casos entra en conflicto con paquetes como `switcheroo-control`. Quien quiera instalarlo lo hace aparte, bajo su propio criterio, siguiendo las instrucciones oficiales: https://github.com/OpenGamingCollective/cardwire/releases
+`gaming/setup-gaming-fedora.sh` es un componente independiente para gaming. Instala/configura Steam, ProtonPlus, Heroic Games Launcher, GameMode, MangoHud, GOverlay, `vm.max_map_count`, `ntsync` y los alias de rendimiento.
 
-## Qué hace `cleanup-fedora-plasma.sh`
+No es necesario ejecutar el script de gaming si solo se quiere preparar Fedora Plasma.
 
-Elimina, con confirmación previa, una lista de aplicaciones de KDE Plasma que vienen por defecto en el spin de Fedora y que normalmente no se usan (KMail, Konqueror, KMahjongg, KMines, KPatience, krfb, krdc, NeoChat, etc. — lista completa en `MANUAL.md`). Es un script **separado**, se corre aparte y por decisión propia.
+## Orden recomendado
 
-## Uso rápido
+Para una instalación nueva:
 
-```
-git clone https://github.com/csr79a/fedora-plasma-setup.git
-cd fedora-plasma-setup
+1. Ejecutar `plasma/setup-fedora-plasma.sh`.
+2. Reiniciar si corresponde, especialmente después de instalar NVIDIA.
+3. Ejecutar `gaming/setup-gaming-fedora.sh` si se quiere preparar el equipo para jugar.
+4. Ejecutar `plasma/cleanup-fedora-plasma.sh` solo si se desea realizar la limpieza opcional.
 
-chmod +x setup/setup-fedora-plasma.sh
-./setup/setup-fedora-plasma.sh
+Los scripts siguen siendo independientes y pueden ejecutarse por separado.
 
-# Opcional, aparte:
-chmod +x cleanup/cleanup-fedora-plasma.sh
-./cleanup/cleanup-fedora-plasma.sh
-```
+## Documentación
 
-Ver `MANUAL.md` para el detalle de cada paso y, muy importante, el proceso manual de **Secure Boot / MOK enrollment** si instalás el driver propietario de NVIDIA.
+La documentación detallada de ambos componentes está reunida en [MANUAL.md](MANUAL.md).
+
+## Migración
+
+El componente que estaba en `setup-gaming-fedora` se ha integrado aquí bajo `gaming/`, manteniendo su script separado del setup de Plasma.

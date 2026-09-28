@@ -1,5 +1,13 @@
 # Manual — fedora-plasma-setup
 
+Este manual reúne la documentación de los dos componentes del repositorio. La configuración de Plasma y la configuración de gaming siguen siendo independientes.
+
+---
+
+# Parte I — Fedora Plasma
+
+# Manual — fedora-plasma-setup
+
 Explicación detallada de cada paso del script, y de los pasos manuales que el script **no** hace por vos.
 
 ---
@@ -159,3 +167,122 @@ El script solo actúa sobre paquetes realmente instalados; si alguno no está pr
 - **Brave**: se removió del script; instalalo aparte si lo querés (`curl -fsS https://dl.brave.com/install.sh | sh`).
 - **Cardwire**: ver sección 7 más arriba.
 - Verificación automática de Secure Boot: intencionalmente no se implementó; ver sección 4 para el proceso manual.
+
+
+---
+
+# Parte II — Gaming
+
+# Manual — setup-gaming-fedora
+
+Explicación detallada de cada paso del script.
+
+---
+
+## Requisitos previos
+
+- Fedora Workstation con KDE Plasma, instalación limpia o ya en uso.
+- Usuario con permisos de `sudo` (no ejecutar el script como root).
+- Conexión a internet.
+
+---
+
+## 1. RPM Fusion
+
+Steam en Fedora se instala desde RPM Fusion nonfree. El script comprueba si `rpmfusion-free-release` y `rpmfusion-nonfree-release` ya están instalados (por ejemplo, si ya corriste `setup-fedora-plasma.sh` antes) y, de ser así, **omite este paso por completo** sin tocar nada. Si falta alguno de los dos, lo instala.
+
+## 2. Steam
+
+Instala el paquete `steam` desde RPM Fusion. Si ya está instalado, se omite.
+
+## 3. ProtonPlus
+
+[ProtonPlus](https://github.com/Vysp3r/ProtonPlus) es una interfaz gráfica para gestionar builds de Proton-GE, Luxtorpeda, Wine-GE, etc. Se instala desde el repo COPR `wehagy/protonplus`:
+
+```
+sudo dnf copr enable wehagy/protonplus
+sudo dnf install protonplus
+```
+
+El script comprueba si el COPR ya está habilitado y si el paquete ya está instalado antes de actuar.
+
+## 4. Heroic Games Launcher (auto-actualización)
+
+En vez de depender de un `.rpm` descargado a mano o de un COPR no oficial, el script:
+
+1. Consulta `https://api.github.com/repos/Heroic-Games-Launcher/HeroicGamesLauncher/releases/latest`
+2. Extrae la URL del asset que termina en `linux-x86_64.rpm` (el `.rpm` oficial publicado por el proyecto)
+3. Compara la versión ahí publicada contra la versión instalada localmente (`rpm -q --qf '%{VERSION}' heroic`)
+4. Si son iguales, no hace nada (`log_ok`, no vuelve a descargar)
+5. Si son distintas (o no está instalado), descarga el `.rpm` a un archivo temporal y lo instala con `sudo dnf install -y`, que actualiza sobre la instalación previa si existía
+
+Esto significa que **cada vez que corras el script**, Heroic queda en la última versión publicada, sin que tengas que ir manualmente a la página de releases. La configuración de Heroic (cuentas de Epic/GOG/Amazon logueadas, biblioteca, ajustes) vive en `~/.config/Heroic` — separada del paquete — así que no se pierde nada al reinstalar/actualizar.
+
+### Por qué no Flatpak ni COPR
+
+- **Flatpak** (`com.heroicgameslauncher.hgl`, oficial en Flathub) es una alternativa perfectamente válida y también se actualiza sola — si preferís esa vía en vez del `.rpm`, simplemente no corras este paso del script e instalá el Flatpak aparte.
+- **COPR**: los repos comunitarios existentes para Heroic en Fedora (`atim/heroic-games-launcher`, `lnvso/heroic-games-launcher`) son **no oficiales**, mantenidos por terceros de forma discontinua — no se consideraron confiables a largo plazo para este script.
+
+## 5. GameMode + MangoHud + GOverlay
+
+- **GameMode** (`gamemode`, de Feral Interactive): aplica optimizaciones temporales de CPU/IO mientras un juego corre.
+- **MangoHud**: overlay en juego con FPS, uso de CPU/GPU, temperaturas, etc.
+- **GOverlay**: interfaz gráfica para configurar los perfiles de MangoHud (qué métricas mostrar, layout, posición, atajos de teclado, etc.) sin tener que editar `~/.config/MangoHud/MangoHud.conf` a mano. Se instala desde los repos oficiales de Fedora, sin necesidad de RPM Fusion ni COPR.
+
+Para usarlos juntos, en las opciones de lanzamiento de un juego en Steam (o en el comando de Heroic/Lutris):
+
+```
+gamemoderun mangohud %command%
+```
+
+Y para editar la configuración de MangoHud gráficamente, simplemente abrí GOverlay desde el menú de aplicaciones.
+
+## 6. `vm.max_map_count`
+
+Varios juegos y motores modernos (por ejemplo Star Citizen, y otros con anti-cheat o mapeos de memoria intensivos) necesitan o se benefician de un límite más alto de `vm.max_map_count`. El script escribe:
+
+```
+vm.max_map_count=2147483642
+```
+
+en `/etc/sysctl.d/80-gamecompatibility.conf` (valor recomendado por Feral Interactive) y aplica el cambio con `sysctl --system`, sin necesidad de reiniciar.
+
+## 7. ntsync
+
+`ntsync` es un módulo de kernel (incorporado a partir del kernel 6.14) que mejora la sincronización de hilos que usa Proton/Wine, especialmente en juegos con anti-cheat o mucha concurrencia. El script:
+
+1. Comprueba si el módulo ya está cargado (`lsmod`). Si ya lo está, y todavía no existe `/etc/modules-load.d/ntsync.conf`, lo crea igualmente — así queda garantizada la persistencia entre reinicios sin importar cómo se haya cargado el módulo la primera vez (por ejemplo, si lo cargaste manualmente antes de correr el script).
+2. Si no está cargado, comprueba si el kernel actual lo trae (`modinfo ntsync`) y lo carga con `modprobe`.
+3. Si logra cargarlo, agrega `/etc/modules-load.d/ntsync.conf` para que se cargue automáticamente en cada arranque.
+4. Si el kernel no lo trae, avisa que hace falta actualizar el kernel — no es un error, solo una limitación de esa versión de kernel.
+
+### Diagnóstico si el módulo no carga
+
+Si ves `[WARN] No se pudo cargar el módulo ntsync`, comprobá:
+
+```bash
+uname -r                          # kernel 6.14 o superior
+mokutil --sb-state                # si Secure Boot está activo y el módulo no está firmado/inscrito, se rechaza la carga
+sudo modprobe ntsync
+lsmod | grep ntsync
+sudo dmesg | tail -n 30           # con sudo: dmesg sin sudo suele fallar por kernel.dmesg_restrict
+```
+
+Con Secure Boot desactivado y kernel ≥ 6.14, `ntsync` debería cargar sin problemas.
+
+## 8. Alias de modo CPU performance
+
+Agrega a `~/.bashrc` (con un marcador para no duplicarlos si corrés el script de nuevo):
+
+```bash
+alias gaming-on='powerprofilesctl set performance'
+alias gaming-off='powerprofilesctl set balanced'
+```
+
+`gaming-on` fuerza el perfil de energía a rendimiento máximo (útil justo antes de jugar, sobre todo en laptops), y `gaming-off` lo vuelve a un perfil balanceado para el uso diario.
+
+## Recomendaciones que el script no automatiza
+
+- **Activar Steam Play para todos los títulos**: Steam → Configuración → Compatibilidad → "Habilitar Steam Play para todos los demás títulos", y elegir la versión de Proton por defecto (podés usar una de las que bajaste con ProtonPlus).
+- **CoreCtrl / LACT** (overclock, fan curves): deliberadamente no incluidos, igual que en `fedora-plasma-setup` — quien lo necesite lo instala por su cuenta.
+
