@@ -172,10 +172,101 @@ step_gamemode_mangohud() {
 }
 
 # ---------------------------------------------------------------------------
-# 6. vm.max_map_count elevado (recomendado por varios juegos/motores modernos)
+# 6. Configuración de GameMode
+# ---------------------------------------------------------------------------
+step_gamemode_config() {
+    log_step "6/9 · Configurando GameMode"
+
+    local config_file="/etc/gamemode.ini"
+
+    if command -v gamemoded &>/dev/null; then
+        log_ok "GameMode está instalado"
+    else
+        log_warn "No se encontró gamemoded después de instalar GameMode."
+        return
+    fi
+
+    if [[ ! -f "$config_file" ]]; then
+        sudo tee "$config_file" >/dev/null <<'EOF'
+[general]
+renice=10
+EOF
+        log_ok "Creado ${config_file} con valores básicos de GameMode"
+    else
+        log_ok "${config_file} ya existe; no se sobrescribe la configuración del usuario"
+    fi
+
+    if gamemoded -t &>/dev/null; then
+        log_ok "La prueba de GameMode terminó correctamente"
+    else
+        log_warn "GameMode está instalado, pero la prueba gamemoded -t no terminó correctamente"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# 7. game-performance: wrapper temporal de rendimiento
+# ---------------------------------------------------------------------------
+step_game_performance() {
+    log_step "7/9 · Instalando game-performance"
+
+    local target="/usr/local/bin/game-performance"
+
+    sudo tee "$target" >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+
+if [[ $# -eq 0 ]]; then
+    echo "Uso: game-performance <comando> [argumentos...]"
+    echo "Ejemplo: game-performance gamemoderun mangohud %command%"
+    exit 2
+fi
+
+if ! command -v systemd-inhibit &>/dev/null; then
+    echo "Error: systemd-inhibit no está disponible." >&2
+    exit 1
+fi
+
+previous_profile=""
+if command -v powerprofilesctl &>/dev/null; then
+    previous_profile="$(powerprofilesctl get 2>/dev/null || true)"
+fi
+
+restore_profile() {
+    if [[ -n "$previous_profile" ]] && command -v powerprofilesctl &>/dev/null; then
+        powerprofilesctl set "$previous_profile" >/dev/null 2>&1 || true
+    fi
+}
+trap restore_profile EXIT INT TERM
+
+if command -v powerprofilesctl &>/dev/null; then
+    if powerprofilesctl list 2>/dev/null | grep -qE 'performance'; then
+        powerprofilesctl set performance >/dev/null 2>&1 || true
+    fi
+fi
+
+exec systemd-inhibit \
+    --what=idle:sleep \
+    --why="Juego en ejecución mediante game-performance" \
+    --mode=block \
+    "$@"
+EOF
+
+    sudo chmod 0755 "$target"
+
+    if [[ -x "$target" ]]; then
+        log_ok "Instalado ${target}"
+        log_info "Uso: game-performance gamemoderun mangohud %command%"
+        log_info "El perfil de energía se cambia temporalmente y se restaura al terminar."
+    else
+        log_warn "No se pudo verificar ${target}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# 8. vm.max_map_count elevado
 # ---------------------------------------------------------------------------
 step_max_map_count() {
-    log_step "6/8 · Ajustando vm.max_map_count"
+    log_step "8/9 · Ajustando vm.max_map_count"
 
     local sysctl_file="/etc/sysctl.d/80-gamecompatibility.conf"
     if [[ -f "$sysctl_file" ]] && grep -q '^vm.max_map_count=2147483642' "$sysctl_file"; then
@@ -188,70 +279,8 @@ step_max_map_count() {
 }
 
 # ---------------------------------------------------------------------------
-# 7. Verificar/activar ntsync
+# 9. Verificar/activar ntsync
 # ---------------------------------------------------------------------------
-step_ntsync() {
-    log_step "7/8 · Verificando soporte de ntsync"
-
-    local modules_file="/etc/modules-load.d/ntsync.conf"
-
-    if lsmod | grep -q '^ntsync'; then
-        log_ok "El módulo ntsync ya está cargado"
-        if [[ ! -f "$modules_file" ]]; then
-            echo "ntsync" | sudo tee "$modules_file" >/dev/null
-            log_ok "ntsync configurado para cargarse automáticamente en cada arranque"
-        fi
-        return
-    fi
-
-    if modinfo ntsync &>/dev/null; then
-        sudo modprobe ntsync
-        if lsmod | grep -q '^ntsync'; then
-            log_ok "Módulo ntsync cargado correctamente"
-            if [[ ! -f "$modules_file" ]]; then
-                echo "ntsync" | sudo tee "$modules_file" >/dev/null
-                log_ok "ntsync configurado para cargarse automáticamente en cada arranque"
-            fi
-        else
-            log_warn "No se pudo cargar el módulo ntsync. Revisá que tu kernel lo soporte."
-        fi
-    else
-        log_warn "Tu kernel no trae el módulo ntsync (se incorporó a partir del kernel 6.14)."
-        log_warn "Actualizá el kernel si querés esta mejora de sincronización para Proton."
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# 8. Alias de modo CPU performance
-# ---------------------------------------------------------------------------
-step_performance_alias() {
-    log_step "8/8 · Agregando alias de modo CPU performance"
-
-    local bashrc="${HOME}/.bashrc"
-    local marker="# --- setup-gaming-fedora: alias de rendimiento ---"
-
-    if ! command -v powerprofilesctl &>/dev/null; then
-        log_warn "No se encontró 'powerprofilesctl'. No se agregan los alias gaming-on/gaming-off."
-        log_warn "Instalá/configurá un proveedor de perfiles de energía antes de usarlos."
-        return
-    fi
-
-    if grep -qF "$marker" "$bashrc" 2>/dev/null; then
-        log_ok "Los alias ya estaban agregados en ${bashrc}"
-        return
-    fi
-
-    {
-        echo ""
-        echo "$marker"
-        echo "alias gaming-on='powerprofilesctl set performance'"
-        echo "alias gaming-off='powerprofilesctl set balanced'"
-    } >> "$bashrc"
-
-    log_ok "Alias agregados a ${bashrc}: 'gaming-on' y 'gaming-off'"
-    log_info "Abrí una terminal nueva (o corré 'source ~/.bashrc') para poder usarlos."
-}
-
 # ---------------------------------------------------------------------------
 # Resumen final
 # ---------------------------------------------------------------------------
@@ -267,8 +296,8 @@ step_summary() {
     echo "  - En las opciones de lanzamiento de cada juego: gamemoderun mangohud %command%"
     echo "  - Usá GOverlay si preferís configurar el overlay de MangoHud gráficamente"
     echo "    en vez de editar el archivo de configuración a mano."
-    echo "  - Usá 'gaming-on' antes de jugar y 'gaming-off' después, si querés forzar"
-    echo "    el perfil de energía a rendimiento máximo."
+    echo "  - Si querés rendimiento temporal durante un juego, usá:"
+    echo "    game-performance gamemoderun mangohud %command%"
     echo "  - Si acabás de habilitar ntsync, puede que necesites reiniciar para que"
     echo "    quede persistente en el próximo arranque."
 }
@@ -283,9 +312,10 @@ main() {
     step_protonplus
     step_heroic_launcher
     step_gamemode_mangohud
+    step_gamemode_config
+    step_game_performance
     step_max_map_count
     step_ntsync
-    step_performance_alias
     step_summary
 }
 
