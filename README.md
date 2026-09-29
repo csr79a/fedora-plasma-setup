@@ -60,7 +60,7 @@ La GUI es opcional. Todos los componentes siguen pudiendo ejecutarse directament
 
 `plasma/setup-fedora-plasma.sh` realiza la configuración general de Fedora KDE Plasma: DNF, actualización del sistema, RPM Fusion, multimedia, microcódigo, códecs AMD, swappiness y Flatpak/Flathub.
 
-`nvidia/setup-nvidia.sh` es el componente independiente para detectar la GPU NVIDIA, instalar `libva-nvidia-driver` y, opcionalmente, `akmod-nvidia` + CUDA.
+`nvidia/setup-nvidia.sh` es el componente independiente para detectar la GPU NVIDIA, instalar `akmod-nvidia`, `libva-nvidia-driver` y las herramientas de diagnóstico `switcherooctl`/`glxinfo`. También crea `nvidia-run` para PRIME Render Offload y verifica el renderizado OpenGL con y sin offload.
 
 `asus/setup-asusctl.sh` es el componente independiente para hardware ASUS: `asusctl`, `asusd`, `power-profiles-daemon` y, opcionalmente, ROG Control Center.
 
@@ -68,7 +68,7 @@ La GUI es opcional. Todos los componentes siguen pudiendo ejecutarse directament
 
 ## Gaming
 
-`gaming/setup-gaming-fedora.sh` es un componente independiente para gaming. Instala/configura Steam, ProtonPlus, Heroic Games Launcher, GameMode, MangoHud, GOverlay, `vm.max_map_count`, `ntsync` y los alias de rendimiento.
+`gaming/setup-gaming-fedora.sh` es un componente independiente para gaming. Instala/configura Steam, ProtonPlus, Heroic Games Launcher, GameMode, MangoHud, GOverlay, `vm.max_map_count`, `ntsync` y `game-performance`.
 
 No es necesario ejecutar el script de gaming si solo se quiere preparar Fedora Plasma.
 
