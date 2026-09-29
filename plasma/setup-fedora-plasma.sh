@@ -225,35 +225,6 @@ step_flatpak_flathub() {
 }
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# 6. Resumen final
-# ---------------------------------------------------------------------------
-step_summary() {
-    log_step "6/6 · Resumen"
-    echo "Instalación/configuración general de Plasma completa."
-    echo "Recomendaciones:"
-    echo "  - Para NVIDIA, ejecutá nvidia/setup-nvidia.sh por separado."
-    echo "  - Para ASUS/ROG, ejecutá asus/setup-asusctl.sh por separado."
-    echo "  - Reiniciá el equipo si instalaste componentes que lo requieran."
-    echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
-}
-
-# ---------------------------------------------------------------------------
-# 8. Resumen final
-# ---------------------------------------------------------------------------
-step_summary() {
-    log_step "8/8 · Resumen"
-    echo "Instalación/configuración completa."
-    echo "Recomendaciones:"
-    echo "  - Reiniciá el equipo, sobre todo si instalaste akmod-nvidia."
-    echo "  - Si tenés Secure Boot activado y usaste akmod-nvidia, revisá MANUAL.md"
-    echo "    para el paso de MOK enrollment (obligatorio, se hace en el próximo arranque)."
-    echo "  - Cardwire no se instala desde este script (sigue en beta). Si lo querés,"
-    echo "    instalalo aparte siguiendo las instrucciones oficiales del proyecto."
-    echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
-}
-
-# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 main() {
@@ -261,10 +232,9 @@ main() {
     step_base_update
     step_rpmfusion_multimedia
     step_cpu_microcode
-    step_gpu_drivers
+    step_gpu_codecs
     step_brave_and_swappiness
     step_flatpak_flathub
-    step_asus_tools
     step_summary
 }
 
