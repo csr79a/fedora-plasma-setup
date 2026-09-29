@@ -1,10 +1,12 @@
 # fedora-plasma-setup
 
-Colección de scripts para preparar **Fedora Workstation / KDE Plasma**, manteniendo separadas la configuración general del sistema y la configuración específica para gaming.
+Colección de scripts para preparar **Fedora Workstation / KDE Plasma**, manteniendo separadas la configuración general del sistema, NVIDIA, ASUS/ROG y gaming.
+
+El repositorio incluye una **GUI en PyQt6** que sirve como lanzador de los scripts Bash reales. La GUI no duplica la lógica de instalación: ejecuta los mismos scripts que pueden ejecutarse desde la terminal.
 
 ## Estructura
 
-```
+```text
 fedora-plasma-setup/
 ├── gui/
 │   └── fedora_setup_gui.py
@@ -21,75 +23,255 @@ fedora-plasma-setup/
 └── MANUAL.md
 ```
 
-## GUI
+---
 
-La interfaz gráfica está desarrollada en **Python 3 + PyQt6** y actúa como una interfaz de control sobre los scripts Bash existentes. La GUI no duplica la lógica de instalación.
+## Requisitos
 
-### Requisitos previos para la GUI
+### Sistema
 
-Antes de abrir la GUI hay que tener instalados:
+- Fedora Workstation / KDE Plasma.
+- Usuario normal con permisos de `sudo`.
+- Conexión a internet.
+- No ejecutar los scripts directamente como `root`.
+
+Para obtener el repositorio y disponer de las herramientas básicas:
+
+```bash
+sudo dnf install -y git curl sudo
+```
+
+### GUI
+
+La interfaz gráfica necesita:
 
 - Python 3
 - PyQt6
-- `sudo`
+- sudo
+- Un entorno gráfico funcional
 
-En Fedora:
+Instalar las dependencias de la GUI:
 
 ```bash
-sudo dnf install python3 python3-pyqt6 sudo
+sudo dnf install -y python3 python3-pyqt6 sudo
 ```
 
-Comprobar que Python y PyQt6 están disponibles:
+Comprobarlas:
 
 ```bash
 python3 --version
 python3 -c "import PyQt6; print('PyQt6 OK')"
+sudo -V
 ```
 
-Desde la raíz del repositorio, iniciar la GUI con:
+No se necesita `pyte` ni ninguna dependencia Python adicional para la GUI.
+
+---
+
+# GUI — Fedora Plasma Setup
+
+La GUI se encuentra en:
+
+```text
+gui/fedora_setup_gui.py
+```
+
+Está construida con **Python 3 + PyQt6** y utiliza un **pseudo-terminal (PTY)** real para ejecutar los scripts Bash.
+
+Esto permite que:
+
+- `sudo` funcione de forma interactiva.
+- Las preguntas de los scripts puedan responderse desde la ventana.
+- La contraseña de `sudo` se introduzca en el campo de entrada sin mostrarse.
+- La salida con colores ANSI se conserve en el panel de ejecución.
+- Un proceso pueda cancelarse desde la propia GUI.
+- Los scripts que necesiten menús o interfaces que no puedan integrarse se puedan abrir en **Konsole** cuando corresponda.
+
+La GUI debe ejecutarse como **usuario normal**. Los scripts solicitan `sudo` cuando necesitan privilegios.
+
+## Instalación del repositorio
+
+Si todavía no tienes el proyecto:
+
+```bash
+git clone https://github.com/csr79a/fedora-plasma-setup.git
+cd fedora-plasma-setup
+```
+
+Instala las dependencias de la GUI:
+
+```bash
+sudo dnf install -y python3 python3-pyqt6 sudo
+```
+
+## Ejecución de la GUI
+
+Desde la raíz del repositorio:
 
 ```bash
 python3 gui/fedora_setup_gui.py
 ```
 
-La GUI utiliza un pseudo-terminal para permitir que los scripts interactúen con `sudo` y con sus preguntas `[s/n]`. Por eso, la contraseña de `sudo` y las respuestas solicitadas por los scripts se pueden introducir desde la propia ventana.
+También puedes darle permiso de ejecución y lanzarla directamente:
 
-La GUI es opcional. Todos los componentes siguen pudiendo ejecutarse directamente desde la terminal.
+```bash
+chmod +x gui/fedora_setup_gui.py
+./gui/fedora_setup_gui.py
+```
 
-## Fedora: instalación nueva, actualización y conflicto de KMime
+**No uses `sudo python3 gui/fedora_setup_gui.py`.**
 
-> **Esta sección es exclusiva para Fedora. No se aplica a Debian.**
+---
 
-En una instalación nueva de Fedora, **actualiza primero el sistema y reinicia antes de continuar con la instalación de paquetes o componentes del proyecto**.
+## Acciones disponibles en la GUI
 
-Ejecuta:
+La ventana está organizada por categorías y cada acción ejecuta directamente el script correspondiente del repositorio.
+
+### Sistema
+
+**Configurar Fedora Plasma**
+
+```bash
+./plasma/setup-fedora-plasma.sh
+```
+
+Realiza la configuración general de Fedora Plasma, incluyendo actualización del sistema, DNF, RPM Fusion, multimedia, microcódigo, códecs AMD, swappiness y Flatpak/Flathub.
+
+**Limpiar Fedora Plasma**
+
+```bash
+./plasma/cleanup-fedora-plasma.sh
+```
+
+Acción de limpieza independiente. La GUI la marca como acción potencialmente destructiva y solicita confirmación antes de ejecutarla.
+
+### NVIDIA
+
+**Instalar NVIDIA**
+
+```bash
+./nvidia/setup-nvidia.sh
+```
+
+Componente independiente para detectar la GPU NVIDIA, instalar/configurar el stack correspondiente y comprobar PRIME Render Offload cuando es posible.
+
+### ASUS / ROG
+
+**Instalar ASUS / ROG**
+
+```bash
+./asus/setup-asusctl.sh
+```
+
+Detecta hardware ASUS y, con confirmación, configura `asusctl`, `asusd`, `power-profiles-daemon` y opcionalmente ROG Control Center.
+
+### Gaming
+
+**Instalar gaming**
+
+```bash
+./gaming/setup-gaming-fedora.sh
+```
+
+Configura el entorno gaming, incluyendo Steam, ProtonPlus, Heroic Games Launcher, GameMode, MangoHud, GOverlay, `vm.max_map_count`, `ntsync` y `game-performance`.
+
+La GUI no tiene un botón separado de limpieza para gaming porque el repositorio actualmente no contiene un `cleanup-gaming-fedora.sh`.
+
+---
+
+# Ejecución directa desde terminal
+
+La GUI es opcional. Cada script puede ejecutarse directamente desde la raíz del repositorio.
+
+Antes, si hace falta:
+
+```bash
+chmod +x plasma/setup-fedora-plasma.sh
+chmod +x plasma/cleanup-fedora-plasma.sh
+chmod +x nvidia/setup-nvidia.sh
+chmod +x asus/setup-asusctl.sh
+chmod +x gaming/setup-gaming-fedora.sh
+```
+
+### Configuración general
+
+```bash
+./plasma/setup-fedora-plasma.sh
+```
+
+### NVIDIA
+
+```bash
+./nvidia/setup-nvidia.sh
+```
+
+### ASUS / ROG
+
+```bash
+./asus/setup-asusctl.sh
+```
+
+### Gaming
+
+```bash
+./gaming/setup-gaming-fedora.sh
+```
+
+### Limpieza
+
+```bash
+./plasma/cleanup-fedora-plasma.sh
+```
+
+Los scripts son independientes y pueden ejecutarse por separado.
+
+---
+
+# Orden recomendado
+
+Para una instalación nueva:
+
+1. Actualiza Fedora y reinicia:
+   ```bash
+   sudo dnf upgrade --refresh
+   sudo reboot
+   ```
+2. Ejecuta **Configurar Fedora Plasma**.
+3. Si el equipo tiene NVIDIA, ejecuta **Instalar NVIDIA**.
+4. Si el equipo es ASUS, ejecuta **Instalar ASUS / ROG**.
+5. Reinicia cuando corresponda, especialmente después de instalar NVIDIA.
+6. Ejecuta **Instalar gaming** si quieres preparar el equipo para jugar.
+7. Ejecuta **Limpiar Fedora Plasma** solo si quieres realizar la limpieza opcional.
+
+También puedes abrir la GUI después de clonar el repositorio y ejecutar las acciones una por una desde la ventana.
+
+---
+
+# Fedora: actualización inicial y conflictos de KMime
+
+> Esta sección es exclusiva para Fedora.
+
+En una instalación nueva de Fedora, se recomienda actualizar primero el sistema y reiniciar antes de continuar:
 
 ```bash
 sudo dnf upgrade --refresh
 sudo reboot
 ```
 
-Después del reinicio, vuelve a ejecutar la instalación del paquete o componente que estabas instalando.
+Si durante una instalación aparece un conflicto de RPM entre `kf6-kmime` y `kmime`, no borres archivos manualmente.
 
-### Conflicto entre `kf6-kmime` y `kmime`
-
-Si durante una instalación aparece un error de RPM indicando que archivos como `libkmime6_qt.qm` o `kmime.categories` entran en conflicto entre `kf6-kmime` y `kmime`, **no borres archivos manualmente**.
-
-Primero sincroniza los paquetes con los repositorios actuales:
+Primero sincroniza los paquetes:
 
 ```bash
 sudo dnf distro-sync --refresh
 ```
 
-Si Fedora solicita reiniciar, hazlo:
+Si Fedora solicita reiniciar:
 
 ```bash
 sudo reboot
 ```
 
-Después del reinicio, vuelve a intentar instalar el paquete que produjo el conflicto.
-
-Si el conflicto continúa, comprueba qué versiones están instaladas y qué paquetes dependen de ellas:
+Para investigar el conflicto:
 
 ```bash
 rpm -q kmime kf6-kmime
@@ -97,44 +279,110 @@ dnf repoquery --whatrequires kmime
 dnf repoquery --whatrequires kf6-kmime
 ```
 
-Con esa información se puede determinar qué paquete debe mantenerse antes de realizar cualquier eliminación.
+No se recomienda borrar archivos de `/usr/share` manualmente ni forzar una transacción con `--replacefiles` sin identificar antes la causa.
 
-**No se recomienda** borrar archivos de `/usr/share` manualmente ni forzar la transacción con opciones como `--replacefiles` sin haber identificado previamente la causa del conflicto.
+---
 
-## Plasma
+# Componentes
 
-`plasma/setup-fedora-plasma.sh` realiza la configuración general de Fedora KDE Plasma: DNF, actualización del sistema, RPM Fusion, multimedia, microcódigo, códecs AMD, swappiness y Flatpak/Flathub.
+## Fedora Plasma
 
-`nvidia/setup-nvidia.sh` es el componente independiente para detectar la GPU NVIDIA, instalar `akmod-nvidia`, `libva-nvidia-driver` y las herramientas de diagnóstico `switcherooctl`/`glxinfo`. También crea `nvidia-run` para PRIME Render Offload y verifica el renderizado OpenGL con y sin offload.
+`plasma/setup-fedora-plasma.sh` configura la base del sistema:
 
-`asus/setup-asusctl.sh` es el componente independiente para hardware ASUS: `asusctl`, `asusd`, `power-profiles-daemon` y, opcionalmente, ROG Control Center.
+- DNF y descargas paralelas.
+- Actualización del sistema.
+- RPM Fusion free/nonfree.
+- Multimedia y FFmpeg.
+- Microcódigo de CPU.
+- Códecs AMD cuando corresponde.
+- Swappiness.
+- Flatpak/Flathub.
 
-`plasma/cleanup-fedora-plasma.sh` es independiente y elimina, previa confirmación, aplicaciones de KDE que no se quieran conservar.
+NVIDIA y ASUS se mantienen como componentes independientes.
+
+## NVIDIA
+
+`nvidia/setup-nvidia.sh` es independiente del setup general. Detecta la GPU NVIDIA e instala/configura el stack NVIDIA correspondiente.
+
+Después de reiniciar, las comprobaciones habituales incluyen:
+
+```bash
+nvidia-smi
+switcherooctl list
+glxinfo | grep "OpenGL renderer"
+nvidia-run glxinfo | grep "OpenGL renderer"
+```
+
+## ASUS / ROG
+
+`asus/setup-asusctl.sh` detecta el fabricante mediante DMI. Si detecta ASUS, solicita confirmación antes de agregar el repositorio Terra e instalar las herramientas ASUS.
+
+Puede instalar:
+
+- `asusctl`
+- `asusd`
+- `power-profiles-daemon`
+- ROG Control Center, opcionalmente
+
+Si el equipo no es ASUS, el script termina sin realizar cambios.
 
 ## Gaming
 
-`gaming/setup-gaming-fedora.sh` es un componente independiente para gaming. Instala/configura Steam, ProtonPlus, Heroic Games Launcher, GameMode, MangoHud, GOverlay, `vm.max_map_count`, `ntsync` y `game-performance`.
+`gaming/setup-gaming-fedora.sh` configura:
 
-No es necesario ejecutar el script de gaming si solo se quiere preparar Fedora Plasma.
+- RPM Fusion cuando es necesario.
+- Steam.
+- ProtonPlus.
+- Heroic Games Launcher.
+- GameMode.
+- MangoHud.
+- GOverlay.
+- `vm.max_map_count`.
+- `ntsync` cuando el kernel lo soporta.
+- `game-performance`.
 
-## Orden recomendado
+Ejemplo de uso para juegos:
 
-Para una instalación nueva:
+```text
+gamemoderun mangohud %command%
+```
 
-1. Actualizar Fedora y reiniciar siguiendo la sección **“Fedora: instalación nueva, actualización y conflicto de KMime”**.
-2. Ejecutar `plasma/setup-fedora-plasma.sh`.
-3. Si el equipo tiene NVIDIA, ejecutar `nvidia/setup-nvidia.sh`.
-4. Si el equipo es ASUS, ejecutar `asus/setup-asusctl.sh`.
-5. Reiniciar si corresponde, especialmente después de instalar NVIDIA.
-6. Ejecutar `gaming/setup-gaming-fedora.sh` si se quiere preparar el equipo para jugar.
-7. Ejecutar `plasma/cleanup-fedora-plasma.sh` solo si se desea realizar la limpieza opcional.
+Y para el wrapper de rendimiento:
 
-Los scripts siguen siendo independientes y pueden ejecutarse por separado.
+```text
+game-performance gamemoderun mangohud %command%
+```
 
-## Documentación
+---
 
-La documentación detallada de ambos componentes está reunida en [MANUAL.md](MANUAL.md).
+# Notas importantes
 
-## Migración
+- La GUI **no reemplaza** los scripts Bash: los ejecuta.
+- La GUI no necesita `pyte`.
+- Ejecuta la GUI y los scripts como usuario normal; utiliza `sudo` cuando sea necesario.
+- Los scripts pueden volver a ejecutarse; están diseñados para comprobar previamente parte de lo que ya está instalado/configurado.
+- NVIDIA y ASUS son componentes independientes del setup general.
+- `cleanup-fedora-plasma.sh` puede eliminar paquetes: revisa la confirmación antes de aceptar.
+- No se incluyen LACT, Cardwire ni Brave en la configuración automática del proyecto.
 
-El componente que estaba en `setup-gaming-fedora` se ha integrado aquí bajo `gaming/`, manteniendo su script separado del setup de Plasma.
+---
+
+# Documentación
+
+La documentación detallada de los componentes se encuentra en:
+
+- [MANUAL.md](MANUAL.md)
+
+El manual contiene la explicación paso a paso de Plasma, NVIDIA, ASUS/ROG y gaming.
+
+---
+
+# Migración
+
+El componente de gaming que anteriormente estaba separado se mantiene integrado en este repositorio bajo:
+
+```text
+gaming/setup-gaming-fedora.sh
+```
+
+El script continúa siendo independiente del setup general de Plasma.
