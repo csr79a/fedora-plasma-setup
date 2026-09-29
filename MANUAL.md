@@ -144,7 +144,18 @@ Para instalar/configurar NVIDIA, ejecutar desde la raíz:
 ./nvidia/setup-nvidia.sh
 ```
 
-Ese componente detecta la GPU NVIDIA, instala `libva-nvidia-driver` y pregunta de forma independiente si se desea instalar el driver propietario mediante `akmod-nvidia` y CUDA.
+Ese componente detecta la GPU NVIDIA, habilita RPM Fusion Nonfree si hace falta, instala `akmod-nvidia`, `libva-nvidia-driver`, `switcheroo-control` y `glx-utils`, y crea el wrapper `nvidia-run` para PRIME Render Offload.
+
+Después del reinicio, en un equipo híbrido se pueden comprobar las dos rutas de renderizado:
+
+```bash
+nvidia-smi
+switcherooctl list
+glxinfo | grep "OpenGL renderer"
+nvidia-run glxinfo | grep "OpenGL renderer"
+```
+
+La primera prueba de `glxinfo` muestra el renderizador OpenGL predeterminado. La prueba mediante `nvidia-run` fuerza el offload hacia NVIDIA. El script considera funcional el offload cuando esta última devuelve un renderizador NVIDIA.
 
 ## 5. Swappiness
 
@@ -314,16 +325,17 @@ sudo dmesg | tail -n 30           # con sudo: dmesg sin sudo suele fallar por ke
 
 Con Secure Boot desactivado y kernel ≥ 6.14, `ntsync` debería cargar sin problemas.
 
-## 8. Alias de modo CPU performance
+## 8. `game-performance`
 
-Agrega a `~/.bashrc` (con un marcador para no duplicarlos si corrés el script de nuevo):
+El script instala `/usr/local/bin/game-performance` como wrapper para ejecutar un juego temporalmente con perfil de rendimiento cuando `powerprofilesctl` lo permite y bloquear la suspensión/idle mediante `systemd-inhibit`.
+
+Uso:
 
 ```bash
-alias gaming-on='powerprofilesctl set performance'
-alias gaming-off='powerprofilesctl set balanced'
+game-performance gamemoderun mangohud %command%
 ```
 
-`gaming-on` fuerza el perfil de energía a rendimiento máximo (útil justo antes de jugar, sobre todo en laptops), y `gaming-off` lo vuelve a un perfil balanceado para el uso diario.
+El wrapper guarda el perfil de energía anterior y trata de restaurarlo al terminar el proceso. Si `powerprofilesctl` no está disponible, igualmente puede ejecutar el comando y mantener el bloqueo de suspensión. No modifica aliases de `~/.bashrc`.
 
 ## Recomendaciones que el script no automatiza
 
