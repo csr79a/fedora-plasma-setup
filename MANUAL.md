@@ -39,7 +39,7 @@ Para utilizar la GUI se necesita:
 En Fedora, instalar los requisitos con:
 
 ```bash
-sudo dnf install python3 python3-qt6 sudo
+sudo dnf install python3 python3-pyqt6 sudo
 ```
 
 Comprobar la instalación:
