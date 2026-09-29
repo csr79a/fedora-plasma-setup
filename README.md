@@ -36,7 +36,7 @@ Antes de abrir la GUI hay que tener instalados:
 En Fedora:
 
 ```bash
-sudo dnf install python3 python3-qt6 sudo
+sudo dnf install python3 python3-pyqt6 sudo
 ```
 
 Comprobar que Python y PyQt6 están disponibles:
