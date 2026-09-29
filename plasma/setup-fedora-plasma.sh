@@ -225,6 +225,19 @@ step_flatpak_flathub() {
 }
 
 # ---------------------------------------------------------------------------
+# 6. Resumen final
+# ---------------------------------------------------------------------------
+step_summary() {
+    log_step "6/6 · Resumen"
+    echo "Instalación/configuración general de Plasma completa."
+    echo "Recomendaciones:"
+    echo "  - Para NVIDIA, ejecutá nvidia/setup-nvidia.sh por separado."
+    echo "  - Para ASUS/ROG, ejecutá asus/setup-asusctl.sh por separado."
+    echo "  - Reiniciá el equipo si instalaste componentes que lo requieran."
+    echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
+}
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 main() {
