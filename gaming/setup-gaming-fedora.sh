@@ -162,7 +162,7 @@ step_heroic_launcher() {
 # 5. GameMode + MangoHud + GOverlay
 # ---------------------------------------------------------------------------
 step_gamemode_mangohud() {
-    log_step "5/8 · Instalando GameMode, MangoHud y GOverlay"
+    log_step "5/9 · Instalando GameMode, MangoHud y GOverlay"
 
     sudo dnf install -y gamemode mangohud goverlay
     log_ok "GameMode, MangoHud y GOverlay instalados"
@@ -281,6 +281,37 @@ step_max_map_count() {
 # ---------------------------------------------------------------------------
 # 9. Verificar/activar ntsync
 # ---------------------------------------------------------------------------
+step_ntsync() {
+    log_step "9/9 · Verificando soporte de ntsync"
+
+    local modules_file="/etc/modules-load.d/ntsync.conf"
+
+    if lsmod | grep -q '^ntsync'; then
+        log_ok "El módulo ntsync ya está cargado"
+        if [[ ! -f "$modules_file" ]]; then
+            echo "ntsync" | sudo tee "$modules_file" >/dev/null
+            log_ok "ntsync configurado para cargarse automáticamente en cada arranque"
+        fi
+        return
+    fi
+
+    if modinfo ntsync &>/dev/null; then
+        sudo modprobe ntsync
+        if lsmod | grep -q '^ntsync'; then
+            log_ok "Módulo ntsync cargado correctamente"
+            if [[ ! -f "$modules_file" ]]; then
+                echo "ntsync" | sudo tee "$modules_file" >/dev/null
+                log_ok "ntsync configurado para cargarse automáticamente en cada arranque"
+            fi
+        else
+            log_warn "No se pudo cargar el módulo ntsync. Revisá que tu kernel lo soporte."
+        fi
+    else
+        log_warn "Tu kernel no trae el módulo ntsync (se incorporó a partir del kernel 6.14)."
+        log_warn "Actualizá el kernel si querés esta mejora de sincronización para Proton."
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Resumen final
 # ---------------------------------------------------------------------------
