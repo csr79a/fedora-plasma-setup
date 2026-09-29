@@ -56,6 +56,51 @@ La GUI utiliza un pseudo-terminal para permitir que los scripts interactúen con
 
 La GUI es opcional. Todos los componentes siguen pudiendo ejecutarse directamente desde la terminal.
 
+## Fedora: instalación nueva, actualización y conflicto de KMime
+
+> **Esta sección es exclusiva para Fedora. No se aplica a Debian.**
+
+En una instalación nueva de Fedora, **actualiza primero el sistema y reinicia antes de continuar con la instalación de paquetes o componentes del proyecto**.
+
+Ejecuta:
+
+```bash
+sudo dnf upgrade --refresh
+sudo reboot
+```
+
+Después del reinicio, vuelve a ejecutar la instalación del paquete o componente que estabas instalando.
+
+### Conflicto entre `kf6-kmime` y `kmime`
+
+Si durante una instalación aparece un error de RPM indicando que archivos como `libkmime6_qt.qm` o `kmime.categories` entran en conflicto entre `kf6-kmime` y `kmime`, **no borres archivos manualmente**.
+
+Primero sincroniza los paquetes con los repositorios actuales:
+
+```bash
+sudo dnf distro-sync --refresh
+```
+
+Si Fedora solicita reiniciar, hazlo:
+
+```bash
+sudo reboot
+```
+
+Después del reinicio, vuelve a intentar instalar el paquete que produjo el conflicto.
+
+Si el conflicto continúa, comprueba qué versiones están instaladas y qué paquetes dependen de ellas:
+
+```bash
+rpm -q kmime kf6-kmime
+dnf repoquery --whatrequires kmime
+dnf repoquery --whatrequires kf6-kmime
+```
+
+Con esa información se puede determinar qué paquete debe mantenerse antes de realizar cualquier eliminación.
+
+**No se recomienda** borrar archivos de `/usr/share` manualmente ni forzar la transacción con opciones como `--replacefiles` sin haber identificado previamente la causa del conflicto.
+
 ## Plasma
 
 `plasma/setup-fedora-plasma.sh` realiza la configuración general de Fedora KDE Plasma: DNF, actualización del sistema, RPM Fusion, multimedia, microcódigo, códecs AMD, swappiness y Flatpak/Flathub.
@@ -76,12 +121,13 @@ No es necesario ejecutar el script de gaming si solo se quiere preparar Fedora P
 
 Para una instalación nueva:
 
-1. Ejecutar `plasma/setup-fedora-plasma.sh`.
-2. Si el equipo tiene NVIDIA, ejecutar `nvidia/setup-nvidia.sh`.
-3. Si el equipo es ASUS, ejecutar `asus/setup-asusctl.sh`.
-4. Reiniciar si corresponde, especialmente después de instalar NVIDIA.
-5. Ejecutar `gaming/setup-gaming-fedora.sh` si se quiere preparar el equipo para jugar.
-6. Ejecutar `plasma/cleanup-fedora-plasma.sh` solo si se desea realizar la limpieza opcional.
+1. Actualizar Fedora y reiniciar siguiendo la sección **“Fedora: instalación nueva, actualización y conflicto de KMime”**.
+2. Ejecutar `plasma/setup-fedora-plasma.sh`.
+3. Si el equipo tiene NVIDIA, ejecutar `nvidia/setup-nvidia.sh`.
+4. Si el equipo es ASUS, ejecutar `asus/setup-asusctl.sh`.
+5. Reiniciar si corresponde, especialmente después de instalar NVIDIA.
+6. Ejecutar `gaming/setup-gaming-fedora.sh` si se quiere preparar el equipo para jugar.
+7. Ejecutar `plasma/cleanup-fedora-plasma.sh` solo si se desea realizar la limpieza opcional.
 
 Los scripts siguen siendo independientes y pueden ejecutarse por separado.
 
