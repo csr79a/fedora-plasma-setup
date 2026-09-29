@@ -78,7 +78,7 @@ configure_dnf_performance() {
 # 1. Base del sistema
 # ---------------------------------------------------------------------------
 step_base_update() {
-    log_step "1/8 · Actualizando el sistema e instalando paquetes base"
+    log_step "1/6 · Actualizando el sistema e instalando paquetes base"
 
     configure_dnf_performance
 
@@ -103,7 +103,7 @@ step_base_update() {
 # 2. RPM Fusion + multimedia
 # ---------------------------------------------------------------------------
 step_rpmfusion_multimedia() {
-    log_step "2/8 · Habilitando RPM Fusion y configurando multimedia"
+    log_step "2/6 · Habilitando RPM Fusion y configurando multimedia"
 
     local fedora_ver
     fedora_ver="$(rpm -E %fedora)"
@@ -143,7 +143,7 @@ step_rpmfusion_multimedia() {
 # 3. Microcódigo de CPU (detección automática Intel/AMD)
 # ---------------------------------------------------------------------------
 step_cpu_microcode() {
-    log_step "3/8 · Detectando CPU e instalando microcódigo"
+    log_step "3/6 · Detectando CPU e instalando microcódigo"
 
     local vendor
     vendor="$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $NF}')"
@@ -171,7 +171,6 @@ step_cpu_microcode() {
     esac
 }
 
-# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # 4. GPU: códecs AMD
 # ---------------------------------------------------------------------------
