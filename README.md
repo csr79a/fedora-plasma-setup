@@ -21,6 +21,41 @@ fedora-plasma-setup/
 └── MANUAL.md
 ```
 
+## GUI
+
+La interfaz gráfica está desarrollada en **Python 3 + PyQt6** y actúa como una interfaz de control sobre los scripts Bash existentes. La GUI no duplica la lógica de instalación.
+
+### Requisitos previos para la GUI
+
+Antes de abrir la GUI hay que tener instalados:
+
+- Python 3
+- PyQt6
+- `sudo`
+
+En Fedora:
+
+```bash
+sudo dnf install python3 python3-qt6 sudo
+```
+
+Comprobar que Python y PyQt6 están disponibles:
+
+```bash
+python3 --version
+python3 -c "import PyQt6; print('PyQt6 OK')"
+```
+
+Desde la raíz del repositorio, iniciar la GUI con:
+
+```bash
+python3 gui/fedora_setup_gui.py
+```
+
+La GUI utiliza un pseudo-terminal para permitir que los scripts interactúen con `sudo` y con sus preguntas `[s/n]`. Por eso, la contraseña de `sudo` y las respuestas solicitadas por los scripts se pueden introducir desde la propia ventana.
+
+La GUI es opcional. Todos los componentes siguen pudiendo ejecutarse directamente desde la terminal.
+
 ## Plasma
 
 `plasma/setup-fedora-plasma.sh` realiza la configuración general de Fedora KDE Plasma: DNF, actualización del sistema, RPM Fusion, multimedia, microcódigo, códecs AMD, swappiness y Flatpak/Flathub.
