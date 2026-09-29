@@ -106,6 +106,7 @@ class SetupWindow(QMainWindow):
         self.input_line.setPlaceholderText(
             "Contraseña de sudo o respuesta a una pregunta [s/n]"
         )
+        self.input_line.setEchoMode(QLineEdit.EchoMode.Normal)
         self.input_line.returnPressed.connect(self.send_input)
         self.input_line.setEnabled(False)
         input_row.addWidget(self.input_line, 1)
@@ -185,6 +186,15 @@ class SetupWindow(QMainWindow):
 
         if data:
             text = data.decode("utf-8", errors="replace")
+            lower_text = text.lower()
+
+            # Oculta la contraseña cuando sudo solicita credenciales.
+            # Las respuestas normales ([s/n]) vuelven a mostrarse como texto.
+            if "password" in lower_text or "contraseña" in lower_text:
+                self.input_line.setEchoMode(QLineEdit.EchoMode.Password)
+            elif "[s/n]" in lower_text or "[y/n]" in lower_text:
+                self.input_line.setEchoMode(QLineEdit.EchoMode.Normal)
+
             self.output.moveCursor(self.output.textCursor().MoveOperation.End)
             self.output.insertPlainText(text)
             self.output.ensureCursorVisible()
@@ -249,6 +259,7 @@ class SetupWindow(QMainWindow):
         self.stop_button.setEnabled(False)
         self.input_line.setEnabled(False)
         self.send_button.setEnabled(False)
+        self.input_line.setEchoMode(QLineEdit.EchoMode.Normal)
         self.set_buttons_enabled(True)
 
     def stop_process(self) -> None:
