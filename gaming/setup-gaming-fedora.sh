@@ -230,6 +230,12 @@ step_performance_alias() {
     local bashrc="${HOME}/.bashrc"
     local marker="# --- setup-gaming-fedora: alias de rendimiento ---"
 
+    if ! command -v powerprofilesctl &>/dev/null; then
+        log_warn "No se encontró 'powerprofilesctl'. No se agregan los alias gaming-on/gaming-off."
+        log_warn "Instalá/configurá un proveedor de perfiles de energía antes de usarlos."
+        return
+    fi
+
     if grep -qF "$marker" "$bashrc" 2>/dev/null; then
         log_ok "Los alias ya estaban agregados en ${bashrc}"
         return
