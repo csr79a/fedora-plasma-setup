@@ -16,6 +16,71 @@ fedora-plasma-setup/
 
 ---
 
+## GUI — Interfaz gráfica
+
+La GUI se encuentra en:
+
+```text
+gui/fedora_setup_gui.py
+```
+
+Está desarrollada en **Python 3 + PyQt6**. Su función es ejecutar los scripts Bash reales del repositorio desde una interfaz gráfica; no contiene una segunda implementación de la lógica de instalación.
+
+### Requisitos previos
+
+Para utilizar la GUI se necesita:
+
+- Fedora con un entorno gráfico funcional.
+- Python 3.
+- PyQt6.
+- `sudo`.
+- Los scripts del repositorio, conservando su estructura de directorios.
+
+En Fedora, instalar los requisitos con:
+
+```bash
+sudo dnf install python3 python3-qt6 sudo
+```
+
+Comprobar la instalación:
+
+```bash
+python3 --version
+python3 -c "import PyQt6; print('PyQt6 OK')"
+```
+
+### Ejecutar la GUI
+
+Desde la raíz del repositorio:
+
+```bash
+python3 gui/fedora_setup_gui.py
+```
+
+También puede ejecutarse directamente:
+
+```bash
+./gui/fedora_setup_gui.py
+```
+
+La GUI usa un pseudo-terminal (PTY), de modo que los scripts pueden solicitar la contraseña de `sudo` y realizar preguntas interactivas como `[s/n]`. Las respuestas se introducen mediante el campo **Entrada** de la ventana.
+
+### Uso
+
+La ventana permite ejecutar por separado:
+
+- Plasma
+- NVIDIA
+- ASUS / ROG
+- Gaming
+- Limpieza
+
+Mientras un componente está ejecutándose, los demás botones quedan bloqueados. El botón **Detener** permite solicitar la terminación del proceso.
+
+La GUI es opcional: los cinco componentes siguen siendo ejecutables directamente desde la terminal.
+
+---
+
 # Parte I — Fedora Plasma
 
 # Manual — fedora-plasma-setup
@@ -62,59 +127,24 @@ Esto es automático y no requiere confirmación — es información pura de comp
 
 ## 4. GPU y códecs AMD
 
-La configuración general de Plasma conserva la detección de GPU AMD y la instalación de `mesa-va-drivers-freeworld`. El soporte NVIDIA se ha separado en `nvidia/setup-nvidia.sh` para poder instalarlo y gestionarlo independientemente.
+La configuración general de Plasma conserva únicamente la gestión de códecs para GPU AMD. La configuración específica de NVIDIA se ha separado en el componente independiente `nvidia/setup-nvidia.sh`.
 
-El script usa `lspci` para detectar si hay GPU AMD, NVIDIA, o ambas (equipos híbridos):
+El script usa `lspci` para detectar GPU AMD:
 
-- **AMD** → instala `mesa-va-drivers-freeworld` (+ variante i686 si está disponible) para aceleración de video VAAPI.
-- **NVIDIA** → instala `libva-nvidia-driver` para códecs, y **pregunta** si querés instalar además el driver propietario completo (`akmod-nvidia` + `xorg-x11-drv-nvidia-cuda`).
+- **AMD** → instala `mesa-va-drivers-freeworld` y, si está disponible, su variante i686 para aceleración de vídeo VAAPI.
+- **NVIDIA** → la configuración del driver NVIDIA no se realiza desde este script. Debe ejecutarse por separado `nvidia/setup-nvidia.sh`.
 
-Si confirmás el driver propietario, el script no se queda de brazos cruzados: además de instalar el paquete, ejecuta
+En equipos híbridos con AMD + NVIDIA, el componente Plasma mantiene la parte general de AMD y el componente NVIDIA puede ejecutarse independientemente.
 
-```
-sudo akmods --force --kernels "$(uname -r)"
-```
+### Configuración NVIDIA
 
-Esto fuerza la compilación del módulo de kernel **de forma síncrona** (el comando espera a que termine) en vez de dejarlo librado al disparador automático de `akmods` en segundo plano, que es asíncrono y puede tardar varios minutos sin avisar. Así, cuando el script llega al resumen final, el módulo ya está compilado y un reinicio es suficiente — no hace falta instalar el driver "aparte" ni esperar a ciegas.
+Para instalar/configurar NVIDIA, ejecutar desde la raíz:
 
-El driver propietario NVIDIA se pregunta (no se instala solo) porque:
-
-- Compila un módulo de kernel la primera vez, lo cual tarda varios minutos.
-- Si tenés **Secure Boot activado**, requiere un paso manual adicional (ver sección siguiente).
-
-El script **no verifica si Secure Boot está activo** — es tu responsabilidad revisarlo si instalás el driver propietario.
-
-### Secure Boot y MOK enrollment (paso manual, solo si instalaste akmod-nvidia)
-
-Si tu equipo tiene Secure Boot **activado**, el módulo de NVIDIA no va a cargar hasta que lo firmes y lo aprobés manualmente. Si Secure Boot está **desactivado**, podés ignorar toda esta sección — el driver funciona directo tras reiniciar.
-
-Pasos (a hacer vos, después de correr el script):
-
-1. Verificar si Secure Boot está activo:
-
-```
-mokutil --sb-state
+```bash
+./nvidia/setup-nvidia.sh
 ```
 
-2. Si está activo, tras instalar `akmod-nvidia`, la clave se genera automáticamente en `/etc/pki/akmods/certs/`.
-3. Importar la clave al MOK (Machine Owner Key):
-
-```
-sudo mokutil --import /etc/pki/akmods/certs/public_key.der
-```
-
-4. Te va a pedir crear una **contraseña temporal** (cualquiera, se usa una sola vez, en el siguiente paso).
-5. Reiniciar el equipo:
-
-```
-sudo reboot
-```
-
-6. Durante el arranque va a aparecer una pantalla azul de **MOK Management** (esto lo maneja el firmware, no Linux).
-7. Elegir **"Enroll MOK"** → **"Continue"** → **"Yes"** → escribir la contraseña del paso 4.
-8. El equipo termina de arrancar con el módulo NVIDIA cargado y confiado por Secure Boot.
-
-Si no hacés este paso y Secure Boot está activo, el módulo `nvidia` simplemente no va a cargar (el sistema sigue funcionando, pero sin aceleración NVIDIA).
+Ese componente detecta la GPU NVIDIA, instala `libva-nvidia-driver` y pregunta de forma independiente si se desea instalar el driver propietario mediante `akmod-nvidia` y CUDA.
 
 ## 5. Swappiness
 
