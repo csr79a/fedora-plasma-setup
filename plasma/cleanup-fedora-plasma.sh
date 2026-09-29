@@ -55,8 +55,8 @@ PACKAGES_TO_REMOVE=(
     "krfb|krfb (Compartir escritorio - servidor)"
     "krdc|krdc (Cliente de escritorio remoto)"
     "neochat|NeoChat (cliente de Matrix)"
-    "dragonplayer|Dragon Player (reproductor multimedia)"
-    "elisa|Elisa (reproductor de música)"
+    "dragon|Dragon Player (reproductor multimedia)"
+    "elisa-player|Elisa (reproductor de música)"
 
     # --- Añadidas en segunda ronda de limpieza ---
     "orca|Orca (lector de pantalla)"
