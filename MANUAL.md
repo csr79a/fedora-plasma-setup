@@ -24,7 +24,17 @@ La GUI se encuentra en:
 gui/fedora_setup_gui.py
 ```
 
-Está desarrollada en **Python 3 + PyQt6**. Su función es ejecutar los scripts Bash reales del repositorio desde una interfaz gráfica; no contiene una segunda implementación de la lógica de instalación.
+Está desarrollada en **Python 3 + PyQt6** y utiliza un **pseudo-terminal (PTY)** real para ejecutar los scripts Bash del repositorio. La GUI no contiene una segunda implementación de la lógica de instalación: cada acción llama al script Bash correspondiente.
+
+La interfaz está organizada por categorías y ofrece exactamente **cinco acciones**:
+
+1. **Sistema → Configurar Fedora Plasma**
+2. **Sistema → Limpiar Fedora Plasma**
+3. **NVIDIA → Instalar NVIDIA**
+4. **ASUS / ROG → Instalar ASUS / ROG**
+5. **Gaming → Instalar gaming**
+
+No existe actualmente una acción independiente de limpieza para Gaming porque el repositorio no contiene un `cleanup-gaming-fedora.sh`.
 
 ### Requisitos previos
 
@@ -35,11 +45,14 @@ Para utilizar la GUI se necesita:
 - PyQt6.
 - `sudo`.
 - Los scripts del repositorio, conservando su estructura de directorios.
+- Un usuario normal con permisos para usar `sudo`.
+
+La GUI **no necesita `pyte`** ni otras dependencias Python adicionales.
 
 En Fedora, instalar los requisitos con:
 
 ```bash
-sudo dnf install python3 python3-pyqt6 sudo
+sudo dnf install -y python3 python3-pyqt6 sudo
 ```
 
 Comprobar la instalación:
@@ -47,9 +60,27 @@ Comprobar la instalación:
 ```bash
 python3 --version
 python3 -c "import PyQt6; print('PyQt6 OK')"
+sudo -V
 ```
 
-### Ejecutar la GUI
+### Instalación del repositorio
+
+Si todavía no tienes el repositorio:
+
+```bash
+git clone https://github.com/csr79a/fedora-plasma-setup.git
+cd fedora-plasma-setup
+```
+
+Después instala las dependencias de la GUI:
+
+```bash
+sudo dnf install -y python3 python3-pyqt6 sudo
+```
+
+No es necesario instalar la GUI mediante `pip`.
+
+### Ejecución de la GUI
 
 Desde la raíz del repositorio:
 
@@ -57,29 +88,183 @@ Desde la raíz del repositorio:
 python3 gui/fedora_setup_gui.py
 ```
 
-También puede ejecutarse directamente:
+También puede ejecutarse directamente si el archivo tiene permiso de ejecución:
 
 ```bash
+chmod +x gui/fedora_setup_gui.py
 ./gui/fedora_setup_gui.py
 ```
 
-La GUI usa un pseudo-terminal (PTY), de modo que los scripts pueden solicitar la contraseña de `sudo` y realizar preguntas interactivas como `[s/n]`. Las respuestas se introducen mediante el campo **Entrada** de la ventana.
+**No ejecutes la GUI con `sudo`**. Debe iniciarse como usuario normal para que la sesión gráfica y el entorno de usuario funcionen correctamente. Los scripts solicitan privilegios mediante `sudo` cuando los necesitan.
 
-### Uso
+### Arquitectura de ejecución
 
-La ventana permite ejecutar por separado:
+La GUI utiliza un **PTY real** para ejecutar los procesos. Esto permite conservar el comportamiento interactivo de los scripts Bash:
 
-- Plasma
-- NVIDIA
-- ASUS / ROG
-- Gaming
-- Limpieza
+- La contraseña de `sudo` puede solicitarse desde la propia ventana.
+- Las preguntas interactivas, como `[s/n]`, pueden responderse mediante el campo **Entrada**.
+- La salida con códigos ANSI se representa en el panel de ejecución.
+- El proceso se ejecuta de forma controlada desde la interfaz.
+- Si una acción necesita un menú o diálogo que no pueda integrarse correctamente, la GUI puede recurrir a un terminal compatible, como **Konsole**.
+- Mientras una acción está ejecutándose, los controles de las demás acciones quedan bloqueados para evitar ejecuciones simultáneas accidentales.
 
-Mientras un componente está ejecutándose, los demás botones quedan bloqueados. El botón **Detener** permite solicitar la terminación del proceso.
+### Las cinco acciones
 
-La GUI es opcional: los cinco componentes siguen siendo ejecutables directamente desde la terminal.
+#### 1. Sistema → Configurar Fedora Plasma
 
----
+Ejecuta:
+
+```bash
+./plasma/setup-fedora-plasma.sh
+```
+
+Es la configuración general de Fedora Plasma. Entre otras tareas, puede:
+
+- Configurar DNF para descargas paralelas.
+- Actualizar el sistema.
+- Habilitar RPM Fusion free/nonfree.
+- Configurar multimedia y FFmpeg.
+- Detectar el fabricante de CPU y configurar microcódigo.
+- Configurar códecs AMD cuando corresponde.
+- Ajustar `vm.swappiness`.
+- Configurar Flatpak para utilizar Flathub.
+
+La configuración específica de NVIDIA y ASUS se mantiene fuera de este script.
+
+#### 2. Sistema → Limpiar Fedora Plasma
+
+Ejecuta:
+
+```bash
+./plasma/cleanup-fedora-plasma.sh
+```
+
+Es una acción potencialmente destructiva. La GUI solicita confirmación antes de ejecutarla.
+
+El script de limpieza elimina, cuando están instalados y después de la confirmación correspondiente, paquetes seleccionados de Plasma/KDE, juegos, herramientas de escaneo/cámara, escritorio remoto y otros componentes definidos por el proyecto.
+
+La GUI no elimina nada directamente: ejecuta el script de limpieza real.
+
+#### 3. NVIDIA → Instalar NVIDIA
+
+Ejecuta:
+
+```bash
+./nvidia/setup-nvidia.sh
+```
+
+Es un componente independiente del setup general. Detecta hardware NVIDIA y configura el stack correspondiente, incluyendo las herramientas necesarias para PRIME Render Offload.
+
+El script puede instalar/configurar, según el sistema:
+
+- `akmod-nvidia`
+- `libva-nvidia-driver`
+- `switcheroo-control`
+- `glx-utils`
+- el wrapper `nvidia-run`
+
+Después de la instalación se recomienda reiniciar y realizar las comprobaciones documentadas en la sección NVIDIA de este manual.
+
+#### 4. ASUS / ROG → Instalar ASUS / ROG
+
+Ejecuta:
+
+```bash
+./asus/setup-asusctl.sh
+```
+
+El script detecta el fabricante mediante:
+
+```text
+/sys/class/dmi/id/sys_vendor
+```
+
+Si detecta hardware ASUS, solicita confirmación antes de agregar el repositorio Terra e instalar las herramientas.
+
+Puede configurar:
+
+- `asusctl`
+- `asusd.service`
+- `power-profiles-daemon`
+- ROG Control Center (`asusctl-rog-gui`), opcional
+
+Si el equipo no es ASUS, el script termina sin realizar cambios.
+
+#### 5. Gaming → Instalar gaming
+
+Ejecuta:
+
+```bash
+./gaming/setup-gaming-fedora.sh
+```
+
+Prepara Fedora para gaming e incluye:
+
+- RPM Fusion cuando es necesario.
+- Steam.
+- ProtonPlus.
+- Heroic Games Launcher.
+- GameMode.
+- MangoHud.
+- GOverlay.
+- `game-performance`.
+- `vm.max_map_count`.
+- Soporte de `ntsync` cuando el kernel lo proporciona.
+
+El script de gaming es independiente del setup general de Plasma y puede ejecutarse por separado.
+
+### Introducción de contraseña y respuestas
+
+Cuando un script solicita la contraseña de `sudo`, la GUI detecta la solicitud y habilita el modo de entrada correspondiente. La contraseña no se muestra en el panel de salida.
+
+Para preguntas normales del script, por ejemplo:
+
+```text
+¿Instalar herramientas ASUS Linux (asusctl + repo Terra)? [s/n]:
+```
+
+se utiliza el campo **Entrada** de la GUI para introducir la respuesta.
+
+La salida del proceso continúa mostrándose en tiempo real en el panel de ejecución.
+
+### Cancelación de una acción
+
+La GUI incluye el botón **Detener** durante la ejecución.
+
+Al solicitar la cancelación, la GUI intenta terminar el proceso de forma progresiva:
+
+1. Envía una interrupción equivalente a **Ctrl+C** al proceso.
+2. Si continúa ejecutándose, solicita su terminación mediante **SIGTERM**.
+3. Como último recurso, utiliza **SIGKILL**.
+
+La cancelación no equivale a una desinstalación ni revierte automáticamente los cambios que el script ya haya realizado. Si una instalación fue interrumpida a mitad de proceso, revisa la salida mostrada por la GUI y, cuando corresponda, vuelve a ejecutar el script para completar los pasos pendientes.
+
+### Ejecución directa sin GUI
+
+La GUI es opcional. Los mismos scripts pueden ejecutarse directamente desde la terminal.
+
+Desde la raíz del repositorio:
+
+```bash
+chmod +x plasma/setup-fedora-plasma.sh
+chmod +x plasma/cleanup-fedora-plasma.sh
+chmod +x nvidia/setup-nvidia.sh
+chmod +x asus/setup-asusctl.sh
+chmod +x gaming/setup-gaming-fedora.sh
+```
+
+Y después:
+
+```bash
+./plasma/setup-fedora-plasma.sh
+./plasma/cleanup-fedora-plasma.sh
+./nvidia/setup-nvidia.sh
+./asus/setup-asusctl.sh
+./gaming/setup-gaming-fedora.sh
+```
+
+Cada componente sigue siendo independiente de la GUI.
+
 
 # Parte I — Fedora Plasma
 
