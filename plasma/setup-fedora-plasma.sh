@@ -3,8 +3,8 @@
 # setup-fedora-plasma.sh
 #
 # Script de configuración inicial para Fedora Workstation / KDE Plasma spin.
-# Deja el equipo listo con drivers multimedia, códecs por hardware (AMD/NVIDIA),
-# microcódigo de CPU, Flathub y (opcionalmente) herramientas ASUS ROG.
+# Deja el equipo listo con configuración general, multimedia, códecs AMD,
+# microcódigo de CPU y Flathub. NVIDIA y ASUS son componentes independientes.
 #
 # Uso:
 #   chmod +x setup-fedora-plasma.sh
@@ -172,57 +172,35 @@ step_cpu_microcode() {
 }
 
 # ---------------------------------------------------------------------------
-# 4. GPU: códecs automáticos + NVIDIA propietario opcional
 # ---------------------------------------------------------------------------
-step_gpu_drivers() {
-    log_step "4/8 · Detectando GPU e instalando códecs por hardware"
+# 4. GPU: códecs AMD
+# ---------------------------------------------------------------------------
+step_gpu_codecs() {
+    log_step "4/6 · Detectando GPU e instalando códecs por hardware"
 
     local gpu_info
     gpu_info="$(lspci -nnk | grep -iE 'vga|3d controller' -A2)"
 
     local has_amd=false
-    local has_nvidia=false
     echo "$gpu_info" | grep -qi 'amd\|ati' && has_amd=true
-    echo "$gpu_info" | grep -qi 'nvidia' && has_nvidia=true
 
-    if ! $has_amd && ! $has_nvidia; then
-        log_warn "No se detectó GPU AMD ni NVIDIA (¿Intel integrada u otra?). Se omite este paso."
+    if ! $has_amd; then
+        log_info "No se detectó GPU AMD. Los componentes NVIDIA se gestionan desde nvidia/setup-nvidia.sh."
         return
     fi
 
-    if $has_amd; then
-        log_info "GPU AMD detectada → instalando códecs VAAPI"
-        sudo dnf install -y mesa-va-drivers-freeworld
-        sudo dnf install -y mesa-va-drivers-freeworld.i686 2>/dev/null \
-            || log_warn "Variante i686 no disponible/instalable en este sistema, se omite (no es crítico)"
-        log_ok "Códecs AMD (mesa-va-drivers-freeworld) instalados"
-    fi
-
-    if $has_nvidia; then
-        log_info "GPU NVIDIA detectada → instalando códecs VAAPI"
-        sudo dnf install -y libva-nvidia-driver
-        log_ok "Códecs NVIDIA (libva-nvidia-driver) instalados"
-
-        echo
-        log_warn "El driver propietario NVIDIA (akmod-nvidia) compila un módulo de kernel."
-        log_warn "Si tenés Secure Boot ACTIVADO, hay un paso manual de firma (MOK enrollment)"
-        log_warn "que este script NO hace por vos — está documentado en MANUAL.md."
-        if ask_yes_no "¿Instalar el driver propietario NVIDIA (akmod-nvidia)?"; then
-            sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
-            log_info "Compilando el módulo de kernel de NVIDIA (esto puede tardar unos minutos)..."
-            sudo akmods --force --kernels "$(uname -r)"
-            log_ok "akmod-nvidia instalado y módulo compilado. Se recomienda reiniciar."
-        else
-            log_info "Se omite la instalación de akmod-nvidia (podés instalarlo más tarde manualmente)"
-        fi
-    fi
+    log_info "GPU AMD detectada → instalando códecs VAAPI"
+    sudo dnf install -y mesa-va-drivers-freeworld
+    sudo dnf install -y mesa-va-drivers-freeworld.i686 2>/dev/null \
+        || log_warn "Variante i686 no disponible/instalable en este sistema, se omite (no es crítico)"
+    log_ok "Códecs AMD (mesa-va-drivers-freeworld) instalados"
 }
 
 # ---------------------------------------------------------------------------
 # 5. Swappiness
 # ---------------------------------------------------------------------------
 step_brave_and_swappiness() {
-    log_step "5/8 · Ajustando swappiness"
+    log_step "5/6 · Ajustando swappiness"
 
     local sysctl_file="/etc/sysctl.d/99-swappiness.conf"
     echo "vm.swappiness=150" | sudo tee "$sysctl_file" >/dev/null
@@ -234,7 +212,7 @@ step_brave_and_swappiness() {
 # 6. Flatpak: quitar remoto de Fedora, dejar solo Flathub
 # ---------------------------------------------------------------------------
 step_flatpak_flathub() {
-    log_step "6/8 · Configurando Flatpak (solo Flathub)"
+    log_step "6/6 · Configurando Flatpak (solo Flathub)"
 
     if flatpak remote-list | grep -qw "^fedora"; then
         flatpak remote-delete fedora --force
@@ -248,56 +226,17 @@ step_flatpak_flathub() {
 }
 
 # ---------------------------------------------------------------------------
-# 7. ASUS (opcional, solo si se detecta hardware ASUS)
 # ---------------------------------------------------------------------------
-step_asus_tools() {
-    log_step "7/8 · Detectando hardware ASUS"
-
-    local vendor
-    vendor="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || echo "")"
-
-    if [[ "$vendor" != *ASUS* ]]; then
-        log_info "No se detectó hardware ASUS (fabricante detectado: '${vendor:-desconocido}'). Se omite este bloque."
-        return
-    fi
-
-    log_info "Hardware ASUS detectado (${vendor})"
-    if ! ask_yes_no "¿Instalar herramientas ASUS Linux (asusctl + repo Terra)?"; then
-        log_info "Se omiten las herramientas ASUS a pedido del usuario"
-        return
-    fi
-
-    if ! pkg_installed terra-release; then
-        sudo dnf install -y --nogpgcheck \
-            --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' \
-            terra-release
-        log_ok "Repositorio Terra habilitado"
-    else
-        log_ok "Repositorio Terra ya estaba habilitado"
-    fi
-
-    sudo dnf install -y asusctl
-    sudo systemctl enable --now asusd.service
-    log_ok "asusctl instalado y asusd.service activo"
-
-    if pkg_installed tuned-ppd; then
-        sudo dnf swap -y tuned-ppd power-profiles-daemon --allowerasing
-        log_ok "tuned-ppd reemplazado por power-profiles-daemon"
-    fi
-    sudo systemctl enable --now power-profiles-daemon.service
-
-    if ask_yes_no "¿Instalar también ROG Control Center (GUI para asusctl)?"; then
-        sudo dnf install -y asusctl-rog-gui
-        log_ok "ROG Control Center instalado"
-    fi
-
-    # NOTA: Cardwire (reemplazo experimental de supergfxd) se removió
-    # deliberadamente de este script. Sigue en beta ("rough edges" según sus
-    # propios desarrolladores, soporte solo por Discord) y en algunos casos
-    # entra en conflicto con paquetes como switcheroo-control. Quien quiera
-    # instalarlo lo hace aparte, bajo su propio criterio, siguiendo las
-    # instrucciones oficiales del proyecto:
-    #   https://github.com/OpenGamingCollective/cardwire/releases
+# 6. Resumen final
+# ---------------------------------------------------------------------------
+step_summary() {
+    log_step "6/6 · Resumen"
+    echo "Instalación/configuración general de Plasma completa."
+    echo "Recomendaciones:"
+    echo "  - Para NVIDIA, ejecutá nvidia/setup-nvidia.sh por separado."
+    echo "  - Para ASUS/ROG, ejecutá asus/setup-asusctl.sh por separado."
+    echo "  - Reiniciá el equipo si instalaste componentes que lo requieran."
+    echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
 }
 
 # ---------------------------------------------------------------------------
