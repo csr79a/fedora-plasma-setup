@@ -78,7 +78,7 @@ main() {
 
     if ! pkg_installed terra-release; then
         sudo dnf install -y --nogpgcheck \
-            --repofrompath 'terra,https://repos.fyralabs.com/terra\$releasever' \
+            --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' \
             terra-release
         log_ok "Repositorio Terra habilitado"
     else
