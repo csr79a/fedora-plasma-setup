@@ -1,6 +1,18 @@
 # Manual — fedora-plasma-setup
 
-Este manual reúne la documentación de los dos componentes del repositorio. La configuración de Plasma y la configuración de gaming siguen siendo independientes.
+Este manual reúne la documentación de los componentes del repositorio. Cada componente sigue siendo independiente y puede ejecutarse por separado.
+
+Estructura principal:
+
+```text
+fedora-plasma-setup/
+├── gui/fedora_setup_gui.py
+├── plasma/setup-fedora-plasma.sh
+├── plasma/cleanup-fedora-plasma.sh
+├── nvidia/setup-nvidia.sh
+├── asus/setup-asusctl.sh
+└── gaming/setup-gaming-fedora.sh
+```
 
 ---
 
@@ -48,7 +60,9 @@ El script lee `/proc/cpuinfo` para identificar el fabricante:
 
 Esto es automático y no requiere confirmación — es información pura de compatibilidad, sin riesgo.
 
-## 4. GPU y códecs (automático + NVIDIA opcional)
+## 4. GPU y códecs AMD
+
+La configuración general de Plasma conserva la detección de GPU AMD y la instalación de `mesa-va-drivers-freeworld`. El soporte NVIDIA se ha separado en `nvidia/setup-nvidia.sh` para poder instalarlo y gestionarlo independientemente.
 
 El script usa `lspci` para detectar si hay GPU AMD, NVIDIA, o ambas (equipos híbridos):
 
@@ -117,9 +131,9 @@ flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flat
 
 Esto aplica a nivel de sistema — funciona igual en KDE Plasma (Discover) que en GNOME (GNOME Software), no es específico de un escritorio.
 
-## 7. Herramientas ASUS (solo si se detecta hardware ASUS)
+## 7. Herramientas ASUS — componente independiente
 
-El script lee `/sys/class/dmi/id/sys_vendor`. Si detecta un fabricante ASUS, **pregunta** antes de hacer nada (porque agrega un repo de terceros y reemplaza el gestor de energía del sistema):
+El componente `asus/setup-asusctl.sh` lee `/sys/class/dmi/id/sys_vendor`. Si detecta un fabricante ASUS, **pregunta** antes de hacer nada (porque agrega un repo de terceros y reemplaza el gestor de energía del sistema):
 
 Si confirmás:
 
