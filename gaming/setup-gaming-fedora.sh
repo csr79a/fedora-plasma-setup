@@ -32,17 +32,16 @@ log_warn()  { echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*"; }
 log_err()   { echo -e "${COLOR_RED}[FAIL]${COLOR_RESET} $*"; }
 log_step()  { echo -e "\n${COLOR_BLUE}==>${COLOR_RESET} \e[1m$*${COLOR_RESET}"; }
 
-ask_yes_no() {
-    local prompt="$1"
-    local answer
-    while true; do
-        read -rp "$(echo -e "${COLOR_YELLOW}?${COLOR_RESET} ${prompt} [s/n]: ")" answer
-        case "${answer,,}" in
-            s|si|sí|y|yes) return 0 ;;
-            n|no)          return 1 ;;
-            *) echo "  Respondé 's' o 'n'." ;;
-        esac
-    done
+require_fedora() {
+    if [[ ! -r /etc/os-release ]]; then
+        log_err "No se pudo leer /etc/os-release. No es posible verificar el sistema operativo."
+        exit 1
+    fi
+    source /etc/os-release
+    if [[ "${ID:-}" != "fedora" ]]; then
+        log_err "Este script está diseñado para Fedora. Sistema detectado: ID=${ID:-desconocido}."
+        exit 1
+    fi
 }
 
 require_root_privileges() {
@@ -65,7 +64,7 @@ pkg_installed() {
 # 1. RPM Fusion (necesario para Steam)
 # ---------------------------------------------------------------------------
 step_ensure_rpmfusion() {
-    log_step "1/8 · Comprobando RPM Fusion (necesario para Steam)"
+    log_step "1/9 · Comprobando RPM Fusion (necesario para Steam)"
 
     if pkg_installed rpmfusion-free-release && pkg_installed rpmfusion-nonfree-release; then
         log_ok "RPM Fusion (free + nonfree) ya estaba habilitado, se omite este paso"
@@ -90,7 +89,7 @@ step_ensure_rpmfusion() {
 # 2. Steam
 # ---------------------------------------------------------------------------
 step_steam() {
-    log_step "2/8 · Instalando Steam"
+    log_step "2/9 · Instalando Steam"
 
     if pkg_installed steam; then
         log_ok "Steam ya estaba instalado"
@@ -104,7 +103,7 @@ step_steam() {
 # 3. ProtonPlus (vía COPR wehagy/protonplus)
 # ---------------------------------------------------------------------------
 step_protonplus() {
-    log_step "3/8 · Instalando ProtonPlus"
+    log_step "3/9 · Instalando ProtonPlus"
 
     if ! dnf copr list 2>/dev/null | grep -qi 'wehagy/protonplus'; then
         sudo dnf copr enable -y wehagy/protonplus
@@ -125,10 +124,14 @@ step_protonplus() {
 # 4. Heroic Games Launcher (descarga automática del último .rpm de GitHub)
 # ---------------------------------------------------------------------------
 step_heroic_launcher() {
-    log_step "4/8 · Descargando e instalando/actualizando Heroic Games Launcher"
+    log_step "4/9 · Descargando e instalando/actualizando Heroic Games Launcher"
 
     local api_url="https://api.github.com/repos/Heroic-Games-Launcher/HeroicGamesLauncher/releases/latest"
     local rpm_url
+
+    if ! command -v curl &>/dev/null; then
+        sudo dnf install -y curl
+    fi
     rpm_url="$(curl -fsSL "$api_url" | grep -oP '"browser_download_url":\s*"\K[^"]*linux-x86_64\.rpm(?=")' | head -n1)"
 
     if [[ -z "$rpm_url" ]]; then
@@ -164,8 +167,16 @@ step_heroic_launcher() {
 step_gamemode_mangohud() {
     log_step "5/9 · Instalando GameMode, MangoHud y GOverlay"
 
-    sudo dnf install -y gamemode mangohud goverlay
-    log_ok "GameMode, MangoHud y GOverlay instalados"
+    local packages=(gamemode mangohud goverlay)
+    local package
+    for package in "${packages[@]}"; do
+        if pkg_installed "$package"; then
+            log_ok "$package ya estaba instalado"
+        else
+            sudo dnf install -y "$package"
+            log_ok "$package instalado"
+        fi
+    done
     log_info "Para usarlos, en las opciones de lanzamiento de un juego en Steam poné:"
     log_info "  gamemoderun mangohud %command%"
     log_info "Podés configurar el overlay de MangoHud gráficamente abriendo GOverlay."
@@ -286,29 +297,33 @@ step_ntsync() {
 
     local modules_file="/etc/modules-load.d/ntsync.conf"
 
-    if lsmod | grep -q '^ntsync'; then
+    if [[ -e /sys/module/ntsync ]]; then
         log_ok "El módulo ntsync ya está cargado"
-        if [[ ! -f "$modules_file" ]]; then
-            echo "ntsync" | sudo tee "$modules_file" >/dev/null
-            log_ok "ntsync configurado para cargarse automáticamente en cada arranque"
-        fi
-        return
-    fi
-
-    if modinfo ntsync &>/dev/null; then
-        sudo modprobe ntsync
-        if lsmod | grep -q '^ntsync'; then
+    elif [[ -x /usr/sbin/modinfo ]] && /usr/sbin/modinfo ntsync &>/dev/null; then
+        if sudo modprobe ntsync; then
             log_ok "Módulo ntsync cargado correctamente"
-            if [[ ! -f "$modules_file" ]]; then
-                echo "ntsync" | sudo tee "$modules_file" >/dev/null
-                log_ok "ntsync configurado para cargarse automáticamente en cada arranque"
-            fi
         else
-            log_warn "No se pudo cargar el módulo ntsync. Revisá que tu kernel lo soporte."
+            log_warn "El módulo ntsync existe, pero no se pudo cargar."
+            return
         fi
     else
         log_warn "Tu kernel no trae el módulo ntsync (se incorporó a partir del kernel 6.14)."
         log_warn "Actualizá el kernel si querés esta mejora de sincronización para Proton."
+        return
+    fi
+
+    if [[ -e /dev/ntsync ]] && [[ -c /dev/ntsync ]]; then
+        log_ok "El dispositivo /dev/ntsync está disponible para Wine/Proton"
+    else
+        log_warn "ntsync está cargado, pero /dev/ntsync no está disponible."
+        return
+    fi
+
+    if [[ ! -f "$modules_file" ]]; then
+        echo "ntsync" | sudo tee "$modules_file" >/dev/null
+        log_ok "ntsync configurado para cargarse automáticamente en cada arranque"
+    else
+        log_ok "ntsync ya estaba configurado para cargarse automáticamente"
     fi
 }
 
@@ -329,14 +344,15 @@ step_summary() {
     echo "    en vez de editar el archivo de configuración a mano."
     echo "  - Si querés rendimiento temporal durante un juego, usá:"
     echo "    game-performance gamemoderun mangohud %command%"
-    echo "  - Si acabás de habilitar ntsync, puede que necesites reiniciar para que"
-    echo "    quede persistente en el próximo arranque."
+    echo "  - ntsync se considera operativo cuando el módulo está cargado y"
+    echo "    /dev/ntsync está disponible para Wine/Proton; puede ser necesario reiniciar."
 }
 
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 main() {
+    require_fedora
     require_root_privileges
     step_ensure_rpmfusion
     step_steam
