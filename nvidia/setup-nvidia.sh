@@ -31,19 +31,6 @@ log_warn() { echo -e "$COLOR_YELLOW[WARN]$COLOR_RESET $*"; }
 log_err()  { echo -e "$COLOR_RED[FAIL]$COLOR_RESET $*"; }
 log_step() { echo -e "\n$COLOR_BLUE==>$COLOR_RESET \e[1m$*$COLOR_RESET"; }
 
-ask_yes_no() {
-    local prompt="$1"
-    local answer
-    while true; do
-        read -rp "$(echo -e "$COLOR_YELLOW?$COLOR_RESET $prompt [s/n]: ")" answer
-        case "$answer" in
-            s|S|si|SI|Si|sí|Sí|y|Y|yes|YES) return 0 ;;
-            n|N|no|NO) return 1 ;;
-            *) echo "  Respondé 's' o 'n'." ;;
-        esac
-    done
-}
-
 require_user() {
     if [[ "$EUID" -eq 0 ]]; then
         log_err "No corras este script directamente como root. Ejecutalo como usuario normal."
@@ -60,8 +47,23 @@ pkg_installed() {
     rpm -q "$1" &>/dev/null
 }
 
+require_fedora() {
+    if [[ ! -r /etc/os-release ]]; then
+        log_err "No se pudo leer /etc/os-release. No es posible verificar el sistema operativo."
+        exit 1
+    fi
+    source /etc/os-release
+    if [[ "${ID:-}" != "fedora" ]]; then
+        log_err "Este script está diseñado para Fedora. Sistema detectado: ID=${ID:-desconocido}."
+        exit 1
+    fi
+}
+
 detect_nvidia() {
-    command -v lspci &>/dev/null || return 1
+    if ! command -v lspci &>/dev/null; then
+        log_err "No se encontró lspci; no se puede comprobar si hay una GPU NVIDIA."
+        return 2
+    fi
     lspci -nn | grep -qi nvidia
 }
 
@@ -87,7 +89,10 @@ ensure_rpmfusion() {
 install_nvidia_stack() {
     log_step "2/7 · Instalando soporte NVIDIA"
 
-    sudo dnf install -y         akmod-nvidia         xorg-x11-drv-nvidia-cuda         libva-nvidia-driver
+    if ! sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda libva-nvidia-driver; then
+        log_err "No se pudieron instalar todos los paquetes NVIDIA requeridos."
+        return 1
+    fi
 
     log_ok "Paquetes NVIDIA instalados"
 
@@ -95,7 +100,8 @@ install_nvidia_stack() {
     if sudo akmods --force --kernels "$(uname -r)"; then
         log_ok "Módulo NVIDIA compilado para $(uname -r)"
     else
-        log_warn "akmods no terminó correctamente; revisá su estado antes de reiniciar."
+        log_err "akmods no terminó correctamente. No reinicies todavía; revisá el estado de akmods y los logs del kernel."
+        return 1
     fi
 }
 
@@ -104,9 +110,12 @@ install_hybrid_tools() {
 
     sudo dnf install -y switcheroo-control glx-utils
 
-    if systemctl list-unit-files switcheroo-control.service &>/dev/null; then
-        sudo systemctl enable --now switcheroo-control.service || true
-        log_ok "switcheroo-control habilitado"
+    if systemctl cat switcheroo-control.service &>/dev/null; then
+        if sudo systemctl enable --now switcheroo-control.service; then
+            log_ok "switcheroo-control habilitado"
+        else
+            log_warn "La unidad switcheroo-control.service existe, pero no se pudo habilitar/iniciar."
+        fi
     else
         log_warn "No se encontró switcheroo-control.service."
     fi
@@ -230,7 +239,7 @@ final_summary() {
 main() {
     require_user
 
-    log_step "Preflight"
+    log_step "0/7 · Preflight"
 
     if ! detect_nvidia; then
         log_warn "No se detectó una GPU NVIDIA. No se instalará el stack NVIDIA."
