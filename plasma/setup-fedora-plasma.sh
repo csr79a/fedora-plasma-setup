@@ -10,8 +10,8 @@
 #   chmod +x setup-fedora-plasma.sh
 #   ./setup-fedora-plasma.sh
 #
-# Repite ejecución: el script es idempotente (se puede correr varias veces sin
-# romper nada; cada paso comprueba si ya está hecho antes de actuar).
+# Repite ejecución: el script está diseñado para poder ejecutarse varias veces sin
+# romper configuraciones existentes; cada paso comprueba el estado cuando corresponde.
 
 set -uo pipefail
 
@@ -30,18 +30,18 @@ log_warn()  { echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*"; }
 log_err()   { echo -e "${COLOR_RED}[FAIL]${COLOR_RESET} $*"; }
 log_step()  { echo -e "\n${COLOR_BLUE}==>${COLOR_RESET} \e[1m$*${COLOR_RESET}"; }
 
-ask_yes_no() {
-    # ask_yes_no "pregunta" -> devuelve 0 (si) o 1 (no)
-    local prompt="$1"
-    local answer
-    while true; do
-        read -rp "$(echo -e "${COLOR_YELLOW}?${COLOR_RESET} ${prompt} [s/n]: ")" answer
-        case "${answer,,}" in
-            s|si|sí|y|yes) return 0 ;;
-            n|no)          return 1 ;;
-            *) echo "  Respondé 's' o 'n'." ;;
-        esac
-    done
+require_fedora() {
+    if [[ ! -r /etc/os-release ]]; then
+        log_err "No se pudo leer /etc/os-release. No es posible verificar el sistema operativo."
+        exit 1
+    fi
+
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    if [[ "${ID:-}" != "fedora" ]]; then
+        log_err "Este script está diseñado para Fedora. Sistema detectado: ID=${ID:-desconocido}."
+        exit 1
+    fi
 }
 
 require_root_privileges() {
@@ -63,14 +63,22 @@ pkg_installed() {
 
 configure_dnf_performance() {
     local dnf_conf="/etc/dnf/dnf.conf"
-    if ! grep -q '^max_parallel_downloads=' "$dnf_conf" 2>/dev/null; then
-        {
-            echo "max_parallel_downloads=10"
-            echo "fastestmirror=True"
-        } | sudo tee -a "$dnf_conf" >/dev/null
-        log_ok "dnf configurado para descargas más rápidas (max_parallel_downloads=10, fastestmirror=True)"
+    local changed=false
+
+    if ! grep -qE '^[[:space:]]*max_parallel_downloads=' "$dnf_conf" 2>/dev/null; then
+        echo "max_parallel_downloads=10" | sudo tee -a "$dnf_conf" >/dev/null
+        changed=true
+    fi
+
+    if ! grep -qE '^[[:space:]]*fastestmirror=' "$dnf_conf" 2>/dev/null; then
+        echo "fastestmirror=True" | sudo tee -a "$dnf_conf" >/dev/null
+        changed=true
+    fi
+
+    if $changed; then
+        log_ok "dnf configurado para descargas más rápidas (se añadieron las opciones que faltaban)"
     else
-        log_ok "dnf ya tenía configuración de descargas paralelas"
+        log_ok "dnf ya tenía max_parallel_downloads y fastestmirror configurados"
     fi
 }
 
@@ -82,8 +90,7 @@ step_base_update() {
 
     configure_dnf_performance
 
-    sudo dnf update --refresh -y
-    sudo dnf upgrade -y
+    sudo dnf upgrade --refresh -y
 
     local base_pkgs=(fastfetch unrar p7zip p7zip-plugins papirus-icon-theme)
     local to_install=()
@@ -190,7 +197,7 @@ step_gpu_codecs() {
 
     log_info "GPU AMD detectada → instalando códecs VAAPI"
     sudo dnf install -y mesa-va-drivers-freeworld
-    sudo dnf install -y mesa-va-drivers-freeworld.i686 2>/dev/null \
+    sudo dnf install -y mesa-va-drivers-freeworld.i686 \
         || log_warn "Variante i686 no disponible/instalable en este sistema, se omite (no es crítico)"
     log_ok "Códecs AMD (mesa-va-drivers-freeworld) instalados"
 }
@@ -198,11 +205,73 @@ step_gpu_codecs() {
 # ---------------------------------------------------------------------------
 # 5. Swappiness
 # ---------------------------------------------------------------------------
-step_brave_and_swappiness() {
+step_swappiness() {
     log_step "5/6 · Ajustando swappiness"
 
     local sysctl_file="/etc/sysctl.d/99-swappiness.conf"
-    echo "vm.swappiness=150" | sudo tee "$sysctl_file" >/dev/null
+    local marker="# Configuración de swappiness gestionada por setup-fedora-plasma.sh"
+
+    # 150 es una política deliberada del proyecto, no un valor universal.
+    # Si el usuario ya tiene este archivo, no se sobrescribe silenciosamente.
+    if [[ -f "$sysctl_file" ]]; then
+        if grep -qF "$marker" "$sysctl_file" && grep -qE '^vm\.swappiness=150: quitar remoto de Fedora, dejar solo Flathub
+# ---------------------------------------------------------------------------
+step_flatpak_flathub() {
+    log_step "6/6 · Configurando Flatpak (solo Flathub)"
+
+    if flatpak remote-list | grep -qw "^fedora"; then
+        flatpak remote-delete fedora --force
+        log_ok "Remoto 'fedora' de Flatpak eliminado"
+    else
+        log_ok "El remoto 'fedora' ya no estaba presente"
+    fi
+
+    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    log_ok "Flathub configurado como único remoto Flatpak"
+}
+
+# ---------------------------------------------------------------------------
+# Resumen final
+# ---------------------------------------------------------------------------
+step_summary() {
+    log_step "Resumen final"
+    echo "Instalación/configuración general de Plasma completa."
+    echo "Recomendaciones:"
+    echo "  - Para NVIDIA, ejecutá nvidia/setup-nvidia.sh por separado."
+    echo "  - Para ASUS/ROG, ejecutá asus/setup-asusctl.sh por separado."
+    echo "  - Reiniciá el equipo si instalaste componentes que lo requieran."
+    echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
+}
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+main() {
+    require_fedora
+    require_root_privileges
+    step_base_update
+    step_rpmfusion_multimedia
+    step_cpu_microcode
+    step_gpu_codecs
+    step_swappiness
+    step_flatpak_flathub
+    step_summary
+}
+
+main "$@"
+ "$sysctl_file"; then
+            sudo sysctl --system >/dev/null
+            log_ok "vm.swappiness=150 ya estaba configurado por este script"
+        else
+            log_warn "Ya existe ${sysctl_file} con contenido ajeno a este script; no se sobrescribe. Se conserva la configuración existente."
+        fi
+        return
+    fi
+
+    {
+        echo "$marker"
+        echo "vm.swappiness=150"
+    } | sudo tee "$sysctl_file" >/dev/null
     sudo sysctl --system >/dev/null
     log_ok "vm.swappiness=150 aplicado (${sysctl_file})"
 }
