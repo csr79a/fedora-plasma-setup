@@ -291,7 +291,7 @@ Antes de actualizar nada, el script configura `/etc/dnf/dnf.conf` con:
 
 Esto acelera notablemente el resto de la instalación (y cualquier `dnf install`/`update` posterior), sin efectos secundarios.
 
-Después actualiza el sistema completo (`dnf update --refresh`, `dnf upgrade`) e instala:
+Después actualiza el sistema completo con `dnf upgrade --refresh` e instala:
 
 - `fastfetch` — información del sistema en terminal
 - `unrar`, `p7zip`, `p7zip-plugins` — soporte de compresión adicional
@@ -344,7 +344,11 @@ La primera prueba de `glxinfo` muestra el renderizador OpenGL predeterminado. La
 
 ## 5. Swappiness
 
-Ajusta `vm.swappiness=150` mediante `/etc/sysctl.d/99-swappiness.conf`, aplicado con `sysctl --system`.
+Ajusta `vm.swappiness=150` mediante `/etc/sysctl.d/99-swappiness.conf` y aplica el cambio con `sysctl --system`.
+
+El valor **150 es una política deliberada del proyecto, no un valor universal**. Busca favorecer el uso de swap bajo presión de memoria y no pretende ser una recomendación general para todos los equipos.
+
+El script no sobrescribe silenciosamente un `/etc/sysctl.d/99-swappiness.conf` que ya exista con una configuración ajena al propio script. Si encuentra uno, conserva la configuración existente y muestra un aviso.
 
 ## 6. Flatpak → solo Flathub
 
@@ -399,7 +403,7 @@ Elimina, con confirmación previa, las siguientes aplicaciones si están instala
 - krfb (compartir escritorio — servidor), krdc (cliente de escritorio remoto)
 - NeoChat (cliente Matrix)
 
-El script solo actúa sobre paquetes realmente instalados; si alguno no está presente, se omite sin error. Pide confirmación antes de eliminar.
+El script solo actúa sobre paquetes realmente instalados; si alguno no está presente, se omite sin error. Pide confirmación antes de eliminar y exige una terminal interactiva para evitar eliminaciones accidentales cuando no existe un canal de confirmación.
 
 ## No incluido en este proyecto
 
