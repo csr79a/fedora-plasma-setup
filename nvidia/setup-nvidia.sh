@@ -225,7 +225,9 @@ verify_prime_offload() {
 final_summary() {
     log_step "7/7 · Resumen"
 
-    pkg_installed akmod-nvidia         && log_ok "akmod-nvidia instalado"         || log_warn "akmod-nvidia no está instalado"
+    pkg_installed akmod-nvidia && log_ok "akmod-nvidia instalado" || log_warn "akmod-nvidia no está instalado"
+    pkg_installed xorg-x11-drv-nvidia-cuda && log_ok "xorg-x11-drv-nvidia-cuda instalado" || log_warn "xorg-x11-drv-nvidia-cuda no está instalado"
+    pkg_installed libva-nvidia-driver && log_ok "libva-nvidia-driver instalado" || log_warn "libva-nvidia-driver no está instalado"
 
     command -v nvidia-smi &>/dev/null         && log_ok "nvidia-smi disponible"         || log_warn "nvidia-smi no disponible"
 
@@ -247,11 +249,16 @@ final_summary() {
 }
 
 main() {
+    require_fedora
     require_user
 
     log_step "0/7 · Preflight"
 
-    if ! detect_nvidia; then
+    detect_nvidia
+    local detection_status=$?
+    if [[ "$detection_status" -eq 2 ]]; then
+        exit 1
+    elif [[ "$detection_status" -ne 0 ]]; then
         log_warn "No se detectó una GPU NVIDIA. No se instalará el stack NVIDIA."
         exit 0
     fi
@@ -259,8 +266,8 @@ main() {
     log_ok "GPU NVIDIA detectada"
 
     ensure_rpmfusion || exit 1
-    install_nvidia_stack
-    install_hybrid_tools
+    install_nvidia_stack || exit 1
+    install_hybrid_tools || exit 1
     install_nvidia_run
     show_gpu_topology
     verify_prime_offload
