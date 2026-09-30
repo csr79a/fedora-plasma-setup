@@ -90,7 +90,11 @@ step_base_update() {
 
     configure_dnf_performance
 
-    sudo dnf upgrade --refresh -y
+    if ! sudo dnf upgrade --refresh -y; then
+        log_warn "dnf upgrade --refresh falló. Se continúa con el resto del paso, pero la actualización del sistema no quedó confirmada."
+    else
+        log_ok "Sistema actualizado correctamente"
+    fi
 
     local base_pkgs=(fastfetch unrar p7zip p7zip-plugins papirus-icon-theme)
     local to_install=()
@@ -140,10 +144,13 @@ step_rpmfusion_multimedia() {
     fi
 
     # Grupo multimedia, excluyendo PackageKit-gstreamer-plugin
-    sudo dnf group install -y Multimedia \
+    if sudo dnf group install -y Multimedia \
         --setopt="install_weak_deps=False" \
-        --exclude=PackageKit-gstreamer-plugin
-    log_ok "Grupo Multimedia instalado"
+        --exclude=PackageKit-gstreamer-plugin; then
+        log_ok "Grupo Multimedia instalado"
+    else
+        log_warn "No se pudo instalar el grupo Multimedia. El resto del script continúa."
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -169,8 +176,13 @@ step_cpu_microcode() {
             log_info "CPU AMD detectada"
             # En Fedora el microcódigo AMD viene dentro de linux-firmware,
             # no como paquete separado (a diferencia de Debian con amd64-microcode).
-            sudo dnf install -y linux-firmware
-            log_ok "linux-firmware presente/actualizado (incluye microcódigo AMD)"
+            if pkg_installed linux-firmware; then
+                log_ok "linux-firmware ya estaba instalado (incluye microcódigo AMD)"
+            elif sudo dnf install -y linux-firmware; then
+                log_ok "linux-firmware instalado (incluye microcódigo AMD)"
+            else
+                log_warn "No se pudo instalar linux-firmware; no se pudo completar este paso para AMD."
+            fi
             ;;
         *)
             log_warn "No se pudo determinar el fabricante de la CPU (vendor_id='${vendor}'). Se omite este paso."
@@ -188,18 +200,41 @@ step_gpu_codecs() {
     gpu_info="$(lspci -nnk | grep -iE 'vga|3d controller' -A2)"
 
     local has_amd=false
+    local has_nvidia=false
+    local has_intel=false
     echo "$gpu_info" | grep -qi 'amd\|ati' && has_amd=true
+    echo "$gpu_info" | grep -qi 'nvidia' && has_nvidia=true
+    echo "$gpu_info" | grep -qi 'intel' && has_intel=true
 
-    if ! $has_amd; then
-        log_info "No se detectó GPU AMD. Los componentes NVIDIA se gestionan desde nvidia/setup-nvidia.sh."
+    if $has_amd; then
+        log_info "GPU AMD detectada → instalando códecs VAAPI"
+    elif $has_nvidia; then
+        log_info "GPU NVIDIA detectada. Sus componentes se gestionan desde nvidia/setup-nvidia.sh."
+        return
+    elif $has_intel; then
+        log_info "GPU Intel detectada. Este paso de códecs AMD no aplica."
+        return
+    else
+        log_info "No se pudo identificar una GPU AMD, Intel o NVIDIA. Se omite este paso."
         return
     fi
-
-    log_info "GPU AMD detectada → instalando códecs VAAPI"
     sudo dnf install -y mesa-va-drivers-freeworld
-    sudo dnf install -y mesa-va-drivers-freeworld.i686 \
-        || log_warn "Variante i686 no disponible/instalable en este sistema, se omite (no es crítico)"
-    log_ok "Códecs AMD (mesa-va-drivers-freeworld) instalados"
+    if sudo dnf install -y mesa-va-drivers-freeworld.i686; then
+        log_ok "Variante i686 de los códecs AMD instalada"
+    else
+        local i686_query
+        local i686_rc
+        i686_query="$(dnf repoquery --available --qf '%{name}' mesa-va-drivers-freeworld.i686 2>&1)"
+        i686_rc=$?
+        if [[ "$i686_rc" -ne 0 ]]; then
+            log_warn "No se pudo comprobar la disponibilidad de mesa-va-drivers-freeworld.i686; se omite la variante i686."
+        elif [[ -z "$i686_query" ]]; then
+            log_warn "La variante i686 de mesa-va-drivers-freeworld no está disponible en los repositorios activos; se omite (no es crítico)."
+        else
+            log_warn "La instalación de mesa-va-drivers-freeworld.i686 falló aunque el paquete está disponible; se omite (no es crítico)."
+        fi
+    fi
+    log_ok "Códecs AMD (mesa-va-drivers-freeworld) configurados
 }
 
 # ---------------------------------------------------------------------------
@@ -211,12 +246,13 @@ step_swappiness() {
     local sysctl_file="/etc/sysctl.d/99-swappiness.conf"
     local marker="# Configuración de swappiness gestionada por setup-fedora-plasma.sh"
 
-    # 150 es una política deliberada del proyecto, no un valor universal.
+    # 60 coincide con el valor predeterminado habitual de Fedora y evita
+    # forzar swap en disco sin que este script configure zram.
     # Si el usuario ya tiene este archivo, no se sobrescribe silenciosamente.
     if [[ -f "$sysctl_file" ]]; then
-        if grep -qF "$marker" "$sysctl_file" && grep -qE '^vm\.swappiness=150$' "$sysctl_file"; then
+        if grep -qF "$marker" "$sysctl_file" && grep -qE '^vm\.swappiness=60$' "$sysctl_file"; then
             sudo sysctl --system >/dev/null
-            log_ok "vm.swappiness=150 ya estaba configurado por este script"
+            log_ok "vm.swappiness=60 ya estaba configurado por este script"
         else
             log_warn "Ya existe ${sysctl_file} con contenido ajeno a este script; no se sobrescribe. Se conserva la configuración existente."
         fi
@@ -225,10 +261,10 @@ step_swappiness() {
 
     {
         echo "$marker"
-        echo "vm.swappiness=150"
+        echo "vm.swappiness=60"
     } | sudo tee "$sysctl_file" >/dev/null
     sudo sysctl --system >/dev/null
-    log_ok "vm.swappiness=150 aplicado (${sysctl_file})"
+    log_ok "vm.swappiness=60 aplicado (${sysctl_file})"
 }
 
 # ---------------------------------------------------------------------------
@@ -237,15 +273,23 @@ step_swappiness() {
 step_flatpak_flathub() {
     log_step "6/6 · Configurando Flatpak (solo Flathub)"
 
-    if flatpak remote-list | grep -qw "^fedora"; then
+    if ! command -v flatpak &>/dev/null; then
+        log_warn "Flatpak no está instalado; no se puede configurar Flathub."
+        return
+    fi
+
+    if flatpak remote-list | grep -q '^fedora$'; then
         flatpak remote-delete fedora --force
         log_ok "Remoto 'fedora' de Flatpak eliminado"
     else
         log_ok "El remoto 'fedora' ya no estaba presente"
     fi
 
-    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-    log_ok "Flathub configurado como único remoto Flatpak"
+    if flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo; then
+        log_ok "Flathub configurado como único remoto Flatpak"
+    else
+        log_warn "No se pudo configurar Flathub."
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -253,7 +297,19 @@ step_flatpak_flathub() {
 # ---------------------------------------------------------------------------
 step_summary() {
     log_step "Resumen final"
-    echo "Instalación/configuración general de Plasma completa."
+    echo "Estado de componentes principales:"
+    for pkg in fastfetch unrar p7zip p7zip-plugins papirus-icon-theme ffmpeg; do
+        if pkg_installed "$pkg"; then
+            echo "  - $pkg: instalado"
+        else
+            echo "  - $pkg: no instalado"
+        fi
+    done
+    if command -v flatpak &>/dev/null && flatpak remote-list | grep -q '^flathub[[:space:]]'; then
+        echo "  - Flathub: configurado"
+    else
+        echo "  - Flathub: no confirmado"
+    fi
     echo "Recomendaciones:"
     echo "  - Para NVIDIA, ejecutá nvidia/setup-nvidia.sh por separado."
     echo "  - Para ASUS/ROG, ejecutá asus/setup-asusctl.sh por separado."
