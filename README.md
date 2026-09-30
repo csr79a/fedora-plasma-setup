@@ -33,6 +33,7 @@ fedora-plasma-setup/
 - Usuario normal con permisos de `sudo`.
 - Conexión a internet.
 - No ejecutar los scripts directamente como `root`.
+- Los scripts de Plasma verifican que el sistema sea Fedora antes de realizar cambios.
 
 Para obtener el repositorio y disponer de las herramientas básicas:
 
@@ -360,7 +361,8 @@ game-performance gamemoderun mangohud %command%
 - La GUI **no reemplaza** los scripts Bash: los ejecuta.
 - La GUI no necesita `pyte`.
 - Ejecuta la GUI y los scripts como usuario normal; utiliza `sudo` cuando sea necesario.
-- Los scripts pueden volver a ejecutarse; están diseñados para comprobar previamente parte de lo que ya está instalado/configurado.
+- Los scripts pueden volver a ejecutarse; comprueban el estado cuando corresponde y evitan sobrescribir configuraciones existentes de forma silenciosa.
+- `vm.swappiness=150` es una política específica del proyecto, no un valor universal; si ya existe una configuración propia en `/etc/sysctl.d/99-swappiness.conf`, el setup no la sobrescribe.
 - NVIDIA y ASUS son componentes independientes del setup general.
 - `cleanup-fedora-plasma.sh` puede eliminar paquetes: revisa la confirmación antes de aceptar.
 - No se incluyen LACT, Cardwire ni Brave en la configuración automática del proyecto.
