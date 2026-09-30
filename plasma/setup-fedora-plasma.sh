@@ -214,7 +214,25 @@ step_swappiness() {
     # 150 es una política deliberada del proyecto, no un valor universal.
     # Si el usuario ya tiene este archivo, no se sobrescribe silenciosamente.
     if [[ -f "$sysctl_file" ]]; then
-        if grep -qF "$marker" "$sysctl_file" && grep -qE '^vm\.swappiness=150: quitar remoto de Fedora, dejar solo Flathub
+        if grep -qF "$marker" "$sysctl_file" && grep -qE '^vm\.swappiness=150$' "$sysctl_file"; then
+            sudo sysctl --system >/dev/null
+            log_ok "vm.swappiness=150 ya estaba configurado por este script"
+        else
+            log_warn "Ya existe ${sysctl_file} con contenido ajeno a este script; no se sobrescribe. Se conserva la configuración existente."
+        fi
+        return
+    fi
+
+    {
+        echo "$marker"
+        echo "vm.swappiness=150"
+    } | sudo tee "$sysctl_file" >/dev/null
+    sudo sysctl --system >/dev/null
+    log_ok "vm.swappiness=150 aplicado (${sysctl_file})"
+}
+
+# ---------------------------------------------------------------------------
+# 6. Flatpak: quitar remoto de Fedora, dejar solo Flathub
 # ---------------------------------------------------------------------------
 step_flatpak_flathub() {
     log_step "6/6 · Configurando Flatpak (solo Flathub)"
@@ -254,68 +272,6 @@ main() {
     step_cpu_microcode
     step_gpu_codecs
     step_swappiness
-    step_flatpak_flathub
-    step_summary
-}
-
-main "$@"
- "$sysctl_file"; then
-            sudo sysctl --system >/dev/null
-            log_ok "vm.swappiness=150 ya estaba configurado por este script"
-        else
-            log_warn "Ya existe ${sysctl_file} con contenido ajeno a este script; no se sobrescribe. Se conserva la configuración existente."
-        fi
-        return
-    fi
-
-    {
-        echo "$marker"
-        echo "vm.swappiness=150"
-    } | sudo tee "$sysctl_file" >/dev/null
-    sudo sysctl --system >/dev/null
-    log_ok "vm.swappiness=150 aplicado (${sysctl_file})"
-}
-
-# ---------------------------------------------------------------------------
-# 6. Flatpak: quitar remoto de Fedora, dejar solo Flathub
-# ---------------------------------------------------------------------------
-step_flatpak_flathub() {
-    log_step "6/6 · Configurando Flatpak (solo Flathub)"
-
-    if flatpak remote-list | grep -qw "^fedora"; then
-        flatpak remote-delete fedora --force
-        log_ok "Remoto 'fedora' de Flatpak eliminado"
-    else
-        log_ok "El remoto 'fedora' ya no estaba presente"
-    fi
-
-    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-    log_ok "Flathub configurado como único remoto Flatpak"
-}
-
-# ---------------------------------------------------------------------------
-# 6. Resumen final
-# ---------------------------------------------------------------------------
-step_summary() {
-    log_step "6/6 · Resumen"
-    echo "Instalación/configuración general de Plasma completa."
-    echo "Recomendaciones:"
-    echo "  - Para NVIDIA, ejecutá nvidia/setup-nvidia.sh por separado."
-    echo "  - Para ASUS/ROG, ejecutá asus/setup-asusctl.sh por separado."
-    echo "  - Reiniciá el equipo si instalaste componentes que lo requieran."
-    echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
-}
-
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
-main() {
-    require_root_privileges
-    step_base_update
-    step_rpmfusion_multimedia
-    step_cpu_microcode
-    step_gpu_codecs
-    step_brave_and_swappiness
     step_flatpak_flathub
     step_summary
 }
