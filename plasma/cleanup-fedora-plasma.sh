@@ -19,10 +19,38 @@ COLOR_RESET="\e[0m"
 COLOR_GREEN="\e[32m"
 COLOR_YELLOW="\e[33m"
 COLOR_BLUE="\e[34m"
+COLOR_RED="\e[31m"
 
 log_info()  { echo -e "${COLOR_BLUE}[INFO]${COLOR_RESET} $*"; }
 log_ok()    { echo -e "${COLOR_GREEN}[ OK ]${COLOR_RESET} $*"; }
 log_warn()  { echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*"; }
+log_err()   { echo -e "${COLOR_RED}[FAIL]${COLOR_RESET} $*"; }
+
+require_fedora() {
+    if [[ ! -r /etc/os-release ]]; then
+        log_err "No se pudo leer /etc/os-release. No es posible verificar el sistema operativo."
+        exit 1
+    fi
+
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    if [[ "${ID:-}" != "fedora" ]]; then
+        log_err "Este script está diseñado para Fedora. Sistema detectado: ID=${ID:-desconocido}."
+        exit 1
+    fi
+}
+
+require_root_privileges() {
+    if [[ "${EUID}" -eq 0 ]]; then
+        log_err "No corras este script directamente como root. Ejecutalo como tu usuario normal; se te pedirá la contraseña de sudo cuando haga falta."
+        exit 1
+    fi
+    if ! command -v sudo &>/dev/null; then
+        log_err "No se encontró 'sudo'. Instalalo antes de ejecutar este script."
+        exit 1
+    fi
+    sudo -v
+}
 
 pkg_installed() {
     rpm -q "$1" &>/dev/null
@@ -82,6 +110,9 @@ PACKAGES_TO_REMOVE=(
 #   sudo dnf install kde-connect korganizer
 
 main() {
+    require_fedora
+    require_root_privileges
+
     log_info "Revisando ${#PACKAGES_TO_REMOVE[@]} aplicaciones candidatas a eliminar..."
 
     local found=()
@@ -110,14 +141,25 @@ main() {
     fi
 
     echo
+    if [[ ! -t 0 ]]; then
+        log_err "La limpieza requiere una terminal interactiva para confirmar la eliminación."
+        exit 1
+    fi
+
     read -rp "¿Confirmás la eliminación de los ${#found[@]} paquetes listados arriba? [s/n]: " confirm
     case "${confirm,,}" in
         s|si|sí|y|yes) ;;
         *) log_info "Cancelado por el usuario. No se eliminó nada."; exit 0 ;;
     esac
 
-    sudo dnf remove -y "${found[@]}"
-    log_ok "Limpieza completada."
+    if sudo dnf remove -y "${found[@]}"; then
+        log_ok "Limpieza completada."
+        log_info "Si quieres revisar dependencias que ya no sean necesarias, puedes ejecutar manualmente: sudo dnf autoremove"
+        log_info "Si quitaste componentes como KDE Connect o KOrganizer y luego los necesitas, puedes reinstalarlos con: sudo dnf install kde-connect korganizer"
+    else
+        log_err "La eliminación de paquetes no terminó correctamente."
+        exit 1
+    fi
 }
 
 main "$@"
