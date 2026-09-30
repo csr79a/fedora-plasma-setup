@@ -130,8 +130,14 @@ install_nvidia_run() {
 
     local target="/usr/local/bin/nvidia-run"
 
+    if [[ -e "$target" ]] && ! grep -qF '# nvidia-run — gestionado por setup-nvidia.sh' "$target" 2>/dev/null; then
+        log_warn "$target ya existe y no parece gestionado por este script; no se sobrescribirá."
+        return 0
+    fi
+
     sudo tee "$target" >/dev/null <<'EOF'
 #!/usr/bin/env bash
+# nvidia-run — gestionado por setup-nvidia.sh
 set -uo pipefail
 
 if [[ $# -eq 0 ]]; then
@@ -140,7 +146,11 @@ if [[ $# -eq 0 ]]; then
     exit 2
 fi
 
-exec env     __NV_PRIME_RENDER_OFFLOAD=1     __GLX_VENDOR_LIBRARY_NAME=nvidia     __VK_LAYER_NV_optimus=NVIDIA_only     VK_LOADER_DRIVERS_SELECT='*nvidia*'     "$@"
+if command -v nvidia-smi &>/dev/null && ! nvidia-smi -L &>/dev/null; then
+    echo "Advertencia: nvidia-smi no puede comunicarse con el driver NVIDIA." >&2
+fi
+
+exec env __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only VK_LOADER_DRIVERS_SELECT='*nvidia*' "$@"
 EOF
 
     sudo chmod 0755 "$target"
