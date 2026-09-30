@@ -5,7 +5,7 @@ configuración del sistema (PyQt6).
 La GUI reúne los scripts del proyecto y los ejecuta tal cual, sin modificarlo.
 El lanzador corre como usuario normal.
 
-Modos de ejecución (campo "modo" de cada acción en proyectos.json):
+Modos de ejecución (campo opcional "modo" de cada acción en CONFIG):
 
   auto        (por defecto) El script se ejecuta DENTRO de esta ventana, en un
               pseudo-terminal: salida con colores, preguntas (read) y contraseña
@@ -641,6 +641,11 @@ class Launcher(QWidget):
 
         if item.get("local"):
             script = ROOT / item["script"]
+            if not script.is_file():
+                QMessageBox.critical(
+                    self, "Script no encontrado",
+                    f"No existe el script:\n{script}")
+                return False
             comando = (
                 f"bash {str(script)!r}; rc=$?; "
                 'echo; echo "El script terminó con código $rc."; '
@@ -840,7 +845,7 @@ def main():
         return 1
     try:
         window = Launcher(CONFIG)
-    except (OSError, ValueError, KeyError) as err:
+    except OSError as err:
         QMessageBox.critical(None, "Error de configuración",
                              f"No se pudo iniciar la configuración de Fedora Plasma:\n{err}")
         return 1
