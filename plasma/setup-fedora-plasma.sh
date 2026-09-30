@@ -234,7 +234,7 @@ step_gpu_codecs() {
             log_warn "La instalación de mesa-va-drivers-freeworld.i686 falló aunque el paquete está disponible; se omite (no es crítico)."
         fi
     fi
-    log_ok "Códecs AMD (mesa-va-drivers-freeworld) configurados
+    log_ok "Códecs AMD (mesa-va-drivers-freeworld) configurados"
 }
 
 # ---------------------------------------------------------------------------
