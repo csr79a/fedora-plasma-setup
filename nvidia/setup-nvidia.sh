@@ -207,14 +207,29 @@ verify_prime_offload() {
 
     log_info "Renderizador OpenGL mediante nvidia-run:"
     local nvidia_renderer
-    nvidia_renderer="$(nvidia-run glxinfo 2>/dev/null | awk -F': ' '/OpenGL renderer string/ {print $2; exit}' || true)"
+    local nvidia_output
+    local nvidia_status=0
+    nvidia_output="$(nvidia-run glxinfo 2>/dev/null)" || nvidia_status=$?
+
+    if [[ "$nvidia_status" -ne 0 ]]; then
+        log_warn "nvidia-run glxinfo terminó con código $nvidia_status."
+        log_info "Si acabás de instalar el driver, reiniciá y repetí la prueba."
+        return
+    fi
+
+    local nvidia_renderer
+    nvidia_renderer="$(printf '%s\n' "$nvidia_output" | awk -F': ' '/OpenGL renderer string/ {print $2; exit}')"
 
     if [[ -n "$nvidia_renderer" ]]; then
         echo "  $nvidia_renderer"
         if echo "$nvidia_renderer" | grep -qi NVIDIA; then
-            log_ok "PRIME Render Offload funciona: OpenGL está usando NVIDIA"
+            if [[ -n "$normal_renderer" ]] && echo "$normal_renderer" | grep -qi NVIDIA; then
+                log_warn "nvidia-run usa NVIDIA, pero el renderizador predeterminado ya era NVIDIA; no se puede demostrar un cambio de offload."
+            else
+                log_ok "PRIME Render Offload funciona: OpenGL está usando NVIDIA"
+            fi
         else
-            log_warn "nvidia-run respondió, pero el renderizador no parece ser NVIDIA."
+            log_warn "nvidia-run respondió correctamente, pero el renderizador no parece ser NVIDIA."
         fi
     else
         log_warn "No se pudo obtener el renderizador NVIDIA mediante nvidia-run."
