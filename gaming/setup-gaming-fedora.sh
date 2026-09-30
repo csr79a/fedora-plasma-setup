@@ -224,6 +224,7 @@ step_game_performance() {
 
     sudo tee "$target" >/dev/null <<'EOF'
 #!/usr/bin/env bash
+# game-performance — gestionado por setup-gaming-fedora.sh
 set -uo pipefail
 
 if [[ $# -eq 0 ]]; then
