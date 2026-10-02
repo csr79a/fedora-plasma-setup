@@ -222,6 +222,11 @@ step_game_performance() {
 
     local target="/usr/local/bin/game-performance"
 
+    if [[ -e "$target" ]] && ! grep -qF '# game-performance — gestionado por setup-gaming-fedora.sh' "$target" 2>/dev/null; then
+        log_warn "$target ya existe y no parece gestionado por este script; no se sobrescribirá."
+        return 0
+    fi
+
     sudo tee "$target" >/dev/null <<'EOF'
 #!/usr/bin/env bash
 # game-performance — gestionado por setup-gaming-fedora.sh
