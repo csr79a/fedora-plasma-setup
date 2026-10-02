@@ -287,7 +287,6 @@ Explicación detallada de cada paso del script, y de los pasos manuales que el s
 Antes de actualizar nada, el script configura `/etc/dnf/dnf.conf` con:
 
 - `max_parallel_downloads=10` — descarga varios paquetes a la vez en lugar de uno por uno.
-- `fastestmirror=True` — elige automáticamente el mirror más rápido disponible.
 
 Esto acelera notablemente el resto de la instalación (y cualquier `dnf install`/`update` posterior), sin efectos secundarios.
 

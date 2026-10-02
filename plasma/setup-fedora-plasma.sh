@@ -63,22 +63,12 @@ pkg_installed() {
 
 configure_dnf_performance() {
     local dnf_conf="/etc/dnf/dnf.conf"
-    local changed=false
 
     if ! grep -qE '^[[:space:]]*max_parallel_downloads=' "$dnf_conf" 2>/dev/null; then
         echo "max_parallel_downloads=10" | sudo tee -a "$dnf_conf" >/dev/null
-        changed=true
-    fi
-
-    if ! grep -qE '^[[:space:]]*fastestmirror=' "$dnf_conf" 2>/dev/null; then
-        echo "fastestmirror=True" | sudo tee -a "$dnf_conf" >/dev/null
-        changed=true
-    fi
-
-    if $changed; then
-        log_ok "dnf configurado para descargas más rápidas (se añadieron las opciones que faltaban)"
+        log_ok "dnf configurado con max_parallel_downloads=10 (${dnf_conf})"
     else
-        log_ok "dnf ya tenía max_parallel_downloads y fastestmirror configurados"
+        log_ok "dnf ya tenía max_parallel_downloads configurado"
     fi
 }
 
