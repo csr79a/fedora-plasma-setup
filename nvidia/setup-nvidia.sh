@@ -206,7 +206,6 @@ verify_prime_offload() {
     fi
 
     log_info "Renderizador OpenGL mediante nvidia-run:"
-    local nvidia_renderer
     local nvidia_output
     local nvidia_status=0
     nvidia_output="$(nvidia-run glxinfo 2>/dev/null)" || nvidia_status=$?

@@ -438,11 +438,21 @@ class VistaLog(QPlainTextEdit):
                 self._fmt.setForeground(QColor(FG_DEFECTO))
             elif n in (38, 48):
                 modo = nums[i + 1] if i + 1 < len(nums) else 0
-                if modo == 2:
-                    if n == 38 and i + 4 < len(nums):
-                        self._fmt.setForeground(QColor(nums[i + 2], nums[i + 3], nums[i + 4]))
+                if modo == 2 and i + 4 < len(nums):
+                    color = QColor(nums[i + 2], nums[i + 3], nums[i + 4])
+                    if n == 38:
+                        self._fmt.setForeground(color)
+                    else:
+                        self._fmt.setBackground(color)
                     i += 4
-                elif modo == 5:
+                elif modo == 5 and i + 2 < len(nums):
+                    indice = nums[i + 2]
+                    if 0 <= indice < len(PALETA):
+                        color = QColor(PALETA[indice])
+                        if n == 38:
+                            self._fmt.setForeground(color)
+                        else:
+                            self._fmt.setBackground(color)
                     i += 2
             i += 1
 
