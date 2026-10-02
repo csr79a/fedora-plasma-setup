@@ -344,9 +344,9 @@ La primera prueba de `glxinfo` muestra el renderizador OpenGL predeterminado. La
 
 ## 5. Swappiness
 
-Ajusta `vm.swappiness=150` mediante `/etc/sysctl.d/99-swappiness.conf` y aplica el cambio con `sysctl --system`.
+Ajusta `vm.swappiness=60` mediante `/etc/sysctl.d/99-swappiness.conf` y aplica el cambio con `sysctl --system`.
 
-El valor **150 es una política deliberada del proyecto, no un valor universal**. Busca favorecer el uso de swap bajo presión de memoria y no pretende ser una recomendación general para todos los equipos.
+El valor **60 coincide con el valor predeterminado habitual de Fedora** y evita forzar el uso de swap en disco sin que el script configure zram. No pretende ser una recomendación general para todos los equipos.
 
 El script no sobrescribe silenciosamente un `/etc/sysctl.d/99-swappiness.conf` que ya exista con una configuración ajena al propio script. Si encuentra uno, conserva la configuración existente y muestra un aviso.
 
