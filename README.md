@@ -86,6 +86,7 @@ Esto permite que:
 - La salida con colores ANSI se conserve en el panel de ejecución.
 - Un proceso pueda cancelarse desde la propia GUI.
 - Los scripts que necesiten menús o interfaces que no puedan integrarse se puedan abrir en **Konsole** cuando corresponda.
+- La ventana muestra las categorías en una barra lateral con buscador, y cada acción como una tarjeta con su indicador de estado.
 
 La GUI debe ejecutarse como **usuario normal**. Los scripts solicitan `sudo` cuando necesitan privilegios.
 

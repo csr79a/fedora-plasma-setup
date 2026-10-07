@@ -36,6 +36,12 @@ La interfaz está organizada por categorías y ofrece exactamente **cinco accion
 
 No existe actualmente una acción independiente de limpieza para Gaming porque el repositorio no contiene un `cleanup-gaming-fedora.sh`.
 
+### La ventana
+
+La ventana tiene dos zonas: a la izquierda, una barra con el buscador y la lista de categorías (Sistema, NVIDIA, ASUS / ROG, Gaming); a la derecha, las acciones en tarjetas. El buscador filtra por título y descripción, y al hacer clic en una categoría se muestran solo sus acciones.
+
+Cada tarjeta lleva su icono, la descripción y un indicador de estado que va cambiando: **Sin ejecutar**, **En ejecución…**, **Completado**, **Falló** o **Cancelado**. Los colores y los iconos de cada categoría se definen en el mapa `SECCIONES` de `gui/fedora_setup_gui.py`.
+
 ### Requisitos previos
 
 Para utilizar la GUI se necesita:
