@@ -20,13 +20,29 @@
 # Requiere un usuario normal con sudo. No ejecutar como root.
 # No soporta variantes Atomic (Silverblue/Kinoite).
 #
+# Uso:
+#   ./setup-nvidia.sh            instala/actualiza y verifica (idempotente)
+#   ./setup-nvidia.sh --verify   solo verifica; usar tras reiniciar
+#   ./setup-nvidia.sh --help
+#
+# Flujo normal en una primera instalación:
+#   1) ./setup-nvidia.sh           -> instala; avisa de que falta reiniciar
+#   2) reiniciar
+#   3) ./setup-nvidia.sh --verify  -> comprueba driver y PRIME Render Offload
+#
 # Códigos de salida:
-#   0  todo instalado y PRIME Render Offload verificado (o sin GPU NVIDIA)
+#   0  correcto: instalado y verificado; o instalado y pendiente de reinicio
+#      (el script lo indica); o sin GPU NVIDIA
 #   1  error o abortado por el usuario
-#   3  instalación correcta, pero la verificación de offload no se pudo
-#      confirmar (normalmente falta reiniciar)
+#   3  el driver no funciona y ningún reinicio pendiente lo explica; o, con
+#      --verify, la verificación no se pudo completar con éxito
 
 set -uo pipefail
+
+MODE="install"
+SB_ENABLED=0
+DRIVER_STATE="unknown"   # active | reboot | broken
+REBOOT_PENDING=0
 
 COLOR_RESET="\e[0m"
 COLOR_GREEN="\e[32m"
@@ -41,6 +57,33 @@ log_err()  { echo -e "$COLOR_RED[FAIL]$COLOR_RESET $*"; }
 log_step() { echo -e "\n$COLOR_BLUE==>$COLOR_RESET \e[1m$*$COLOR_RESET"; }
 
 SUDO_KEEPALIVE_PID=""
+
+usage() {
+    cat <<'EOF'
+Uso: setup-nvidia.sh [--verify] [--help]
+
+  (sin argumentos)  Instala/actualiza el soporte NVIDIA y verifica.
+                    Es seguro volver a ejecutarlo.
+  --verify          Solo verifica el driver y PRIME Render Offload.
+                    Úsalo después de reiniciar, desde una terminal del escritorio.
+  -h, --help        Muestra esta ayuda.
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --verify)  MODE="verify" ;;
+            -h|--help) usage; exit 0 ;;
+            *)
+                log_err "Argumento desconocido: $1"
+                usage >&2
+                exit 1
+                ;;
+        esac
+        shift
+    done
+}
 
 require_not_root() {
     if [[ "$EUID" -eq 0 ]]; then
@@ -92,6 +135,9 @@ require_fedora() {
     fi
 }
 
+# Devuelve 0 si hay un dispositivo PCI de clase display (03xx) con vendor
+# NVIDIA (10de); 1 si no; 2 si no se pudo comprobar. Filtrar por clase evita
+# falsos positivos con otros dispositivos NVIDIA que no son GPU.
 detect_nvidia() {
     if ! command -v lspci &>/dev/null; then
         log_err "No se encontró lspci; no se puede comprobar si hay una GPU NVIDIA."
@@ -101,7 +147,7 @@ detect_nvidia() {
     local lspci_out
     lspci_out="$(lspci -nn 2>/dev/null)" || return 2
 
-    grep -qi nvidia <<<"$lspci_out"
+    grep -Eiq '\[03[0-9a-f]{2}\]:.*\[10de:' <<<"$lspci_out"
 }
 
 # Con Secure Boot activo, el módulo compilado por akmods no carga sin firma
@@ -116,19 +162,23 @@ check_secure_boot() {
     sb_state="$(mokutil --sb-state 2>/dev/null || true)"
 
     if grep -qi 'SecureBoot enabled' <<<"$sb_state"; then
+        SB_ENABLED=1
         log_warn "Secure Boot está ACTIVO. El módulo NVIDIA no cargará sin firmarlo y enrolar la clave MOK."
-        log_warn "Si es la única GPU o la que usa el escritorio, podrías quedarte sin gráficos tras reiniciar."
 
-        if [[ -t 0 ]]; then
-            local answer
-            read -r -p "¿Continuar de todos modos? [s/N] " answer
-            if [[ "${answer,,}" != s* ]]; then
-                log_info "Abortado por el usuario."
+        if [[ "$MODE" == "install" ]]; then
+            log_warn "Si es la única GPU o la que usa el escritorio, podrías quedarte sin gráficos tras reiniciar."
+
+            if [[ -t 0 ]]; then
+                local answer
+                read -r -p "¿Continuar de todos modos? [s/N] " answer
+                if [[ "${answer,,}" != s* ]]; then
+                    log_info "Abortado por el usuario."
+                    exit 1
+                fi
+            else
+                log_err "Ejecución no interactiva con Secure Boot activo; se aborta por seguridad."
                 exit 1
             fi
-        else
-            log_err "Ejecución no interactiva con Secure Boot activo; se aborta por seguridad."
-            exit 1
         fi
     elif grep -qi 'SecureBoot disabled' <<<"$sb_state"; then
         log_ok "Secure Boot desactivado; el módulo cargará sin firma"
@@ -179,7 +229,18 @@ install_nvidia_stack() {
 
     log_ok "Paquetes NVIDIA instalados"
 
-    log_info "Forzando compilación del módulo NVIDIA para el kernel actual..."
+    # Solo se recompila si no hay un módulo de la versión instalada para el
+    # kernel en ejecución; así las re-ejecuciones no repiten la compilación.
+    local mod_ver pkg_ver
+    mod_ver="$(modinfo -k "$(uname -r)" -F version nvidia 2>/dev/null || true)"
+    pkg_ver="$(rpm -q --qf '%{VERSION}' akmod-nvidia 2>/dev/null || true)"
+
+    if [[ -n "$mod_ver" && "$mod_ver" == "$pkg_ver" ]]; then
+        log_ok "Módulo NVIDIA $mod_ver ya disponible para $(uname -r)"
+        return 0
+    fi
+
+    log_info "Compilando el módulo NVIDIA para el kernel actual..."
     if sudo akmods --force --kernels "$(uname -r)"; then
         log_ok "Módulo NVIDIA compilado para $(uname -r)"
     else
@@ -256,18 +317,74 @@ EOF
     fi
 }
 
-show_gpu_topology() {
-    log_step "5/7 · Comprobando topología gráfica"
-
-    if command -v nvidia-smi &>/dev/null; then
-        if nvidia-smi --query-gpu=name,pci.bus_id,driver_version --format=csv,noheader 2>/dev/null; then
-            log_ok "nvidia-smi responde correctamente"
-        else
-            log_warn "nvidia-smi está instalado pero no pudo consultar la GPU."
-        fi
+# Estado del driver en el arranque actual:
+#   active  nvidia-smi se comunica con el driver
+#   reboot  el driver no responde y nouveau/nova_core siguen cargados: el
+#           reinicio con la blacklist aplicada es lo que falta
+#   broken  el driver no responde y no hay un reinicio pendiente que lo explique
+nvidia_driver_state() {
+    if nvidia-smi -L &>/dev/null; then
+        echo "active"
+    elif [[ -d /sys/module/nouveau || -d /sys/module/nova_core ]]; then
+        echo "reboot"
     else
-        log_warn "nvidia-smi todavía no está disponible."
+        echo "broken"
     fi
+}
+
+# 0 = el kernel por defecto lleva la blacklist de nouveau; 1 = no la lleva;
+# 2 = no se pudo comprobar.
+blacklist_configured() {
+    command -v grubby &>/dev/null || return 2
+
+    local args
+    args="$(sudo grubby --info=DEFAULT 2>/dev/null | grep '^args=')" || return 2
+
+    grep -Eq '(modprobe|rd\.driver)\.blacklist=[^ "]*nouveau' <<<"$args"
+}
+
+diagnose_broken_driver() {
+    if ! modinfo -k "$(uname -r)" nvidia &>/dev/null; then
+        log_err "No hay módulo nvidia instalado para el kernel en ejecución ($(uname -r))."
+        log_info "Revisa: sudo journalctl -u akmods --no-pager | tail -n 40"
+        log_info "        ls /var/cache/akmods/nvidia/"
+    else
+        log_err "El módulo nvidia existe para $(uname -r), pero no enlaza con la GPU."
+        log_info "Revisa: journalctl -b -k --no-pager | grep -iE 'nvidia|NVRM|nouveau'"
+    fi
+
+    if [[ "$SB_ENABLED" -eq 1 ]]; then
+        log_warn "Secure Boot está activo: comprueba que la clave de akmods está enrolada en MOK."
+    fi
+}
+
+show_gpu_topology() {
+    log_step "5/7 · Comprobando driver y topología gráfica"
+
+    DRIVER_STATE="$(nvidia_driver_state)"
+
+    case "$DRIVER_STATE" in
+        active)
+            nvidia-smi -L
+            log_ok "El driver NVIDIA está cargado y responde"
+            ;;
+        reboot)
+            REBOOT_PENDING=1
+            log_info "El driver NVIDIA aún no está activo: nouveau/nova_core siguen cargados en este arranque."
+            log_info "Es lo esperado justo tras instalar; hace falta reiniciar."
+
+            local bl_rc=0
+            blacklist_configured || bl_rc=$?
+            if [[ "$bl_rc" -eq 1 ]]; then
+                log_warn "El kernel por defecto no lleva la blacklist de nouveau; reiniciar podría no bastar."
+                log_info "Revisa: sudo grubby --info=DEFAULT | grep '^args='"
+            fi
+            ;;
+        *)
+            log_warn "El driver NVIDIA no responde y no hay un reinicio pendiente que lo explique."
+            diagnose_broken_driver
+            ;;
+    esac
 
     if command -v switcherooctl &>/dev/null; then
         echo
@@ -275,12 +392,37 @@ show_gpu_topology() {
     fi
 }
 
-# Devuelve 0 solo si se demuestra que nvidia-run cambia el renderizador a NVIDIA.
+# Devuelve:
+#   0  verificado: nvidia-run usa NVIDIA
+#   1  fallo real
+#   2  no se pudo verificar (reinicio pendiente o sin sesión gráfica)
 verify_prime_offload() {
     log_step "6/7 · Verificación funcional de PRIME Render Offload"
 
+    case "$DRIVER_STATE" in
+        reboot)
+            log_info "Verificación omitida: el driver NVIDIA aún no está activo en este arranque."
+            return 2
+            ;;
+        broken)
+            log_err "Verificación imposible: el driver NVIDIA no responde."
+            return 1
+            ;;
+    esac
+
+    if [[ -z "${WAYLAND_DISPLAY:-}" && -z "${DISPLAY:-}" ]]; then
+        log_warn "Este terminal no tiene sesión gráfica (sin WAYLAND_DISPLAY ni DISPLAY); no se puede probar OpenGL."
+        log_info "Ejecuta './setup-nvidia.sh --verify' desde un terminal dentro del escritorio."
+        return 2
+    fi
+
     if ! command -v glxinfo &>/dev/null; then
-        log_warn "Falta glxinfo; no se puede comprobar OpenGL."
+        log_err "Falta glxinfo; no se puede comprobar OpenGL."
+        return 1
+    fi
+
+    if ! command -v nvidia-run &>/dev/null; then
+        log_err "nvidia-run no está disponible; no se puede probar el offload."
         return 1
     fi
 
@@ -295,19 +437,13 @@ verify_prime_offload() {
         log_warn "No se pudo obtener el renderizador OpenGL predeterminado."
     fi
 
-    if ! command -v nvidia-run &>/dev/null; then
-        log_warn "nvidia-run no está disponible; se omite la prueba de offload."
-        return 1
-    fi
-
     log_info "Renderizador OpenGL mediante nvidia-run:"
     local nvidia_output
     local nvidia_status=0
     nvidia_output="$(nvidia-run glxinfo 2>/dev/null)" || nvidia_status=$?
 
     if [[ "$nvidia_status" -ne 0 ]]; then
-        log_warn "nvidia-run glxinfo terminó con código $nvidia_status."
-        log_info "Si acabas de instalar el driver, reinicia y repite la prueba."
+        log_err "nvidia-run glxinfo terminó con código $nvidia_status con el driver activo."
         return 1
     fi
 
@@ -315,25 +451,35 @@ verify_prime_offload() {
     nvidia_renderer="$(printf '%s\n' "$nvidia_output" | awk -F': ' '/OpenGL renderer string/ {print $2; exit}')"
 
     if [[ -z "$nvidia_renderer" ]]; then
-        log_warn "No se pudo obtener el renderizador NVIDIA mediante nvidia-run."
-        log_info "Si acabas de instalar el driver, reinicia y repite la prueba."
+        log_err "No se pudo obtener el renderizador NVIDIA mediante nvidia-run."
         return 1
     fi
 
     echo "  $nvidia_renderer"
 
     if ! grep -qi NVIDIA <<<"$nvidia_renderer"; then
-        log_warn "nvidia-run respondió correctamente, pero el renderizador no parece ser NVIDIA."
+        log_err "nvidia-run respondió, pero el renderizador no es NVIDIA."
         return 1
     fi
 
     if [[ -n "$normal_renderer" ]] && grep -qi NVIDIA <<<"$normal_renderer"; then
-        log_warn "nvidia-run usa NVIDIA, pero el renderizador predeterminado ya era NVIDIA; no se puede demostrar un cambio de offload."
-        return 1
+        log_ok "El renderizador predeterminado ya es NVIDIA (el offload no es necesario) y nvidia-run funciona"
+        return 0
     fi
 
     log_ok "PRIME Render Offload funciona: OpenGL está usando NVIDIA"
     return 0
+}
+
+secure_boot_notes() {
+    echo
+    echo "Secure Boot está activo: el módulo NVIDIA debe estar firmado con una clave enrolada en MOK."
+    echo "  1) Si no existe /etc/pki/akmods/certs/public_key.der:  sudo kmodgenca -a"
+    echo "  2) sudo mokutil --import /etc/pki/akmods/certs/public_key.der"
+    echo "  3) Reinicia y completa 'Enroll MOK' en la pantalla azul con la contraseña que definiste."
+    echo "  4) Si el módulo se compiló antes de existir la clave, recompílalo:"
+    echo "     sudo akmods --force --kernels \"\$(uname -r)\""
+    echo "(Camino no probado por este script en un equipo real; consulta la documentación de RPM Fusion.)"
 }
 
 final_summary() {
@@ -348,18 +494,24 @@ final_summary() {
     if command -v glxinfo &>/dev/null; then log_ok "glxinfo disponible"; else log_warn "glxinfo no disponible"; fi
     if [[ -x /usr/local/bin/nvidia-run ]]; then log_ok "nvidia-run instalado"; else log_warn "nvidia-run no está instalado"; fi
 
-    echo
-    echo "Pruebas manuales después de reiniciar:"
-    echo "  nvidia-smi"
-    echo "  switcherooctl list"
-    echo '  glxinfo | grep "OpenGL renderer"'
-    echo '  nvidia-run glxinfo | grep "OpenGL renderer"'
-    echo
-    echo "En un sistema híbrido, la última prueba debería mostrar una GPU NVIDIA."
-    echo "Si Secure Boot está activo y el módulo no carga, revisa el enrolamiento MOK."
+    if [[ "$SB_ENABLED" -eq 1 ]]; then
+        secure_boot_notes
+    fi
+
+    if [[ "$REBOOT_PENDING" -eq 1 ]]; then
+        echo
+        echo "Reinicia y, desde un terminal del escritorio, ejecuta:"
+        echo "  ./setup-nvidia.sh --verify"
+        echo
+        echo "o comprueba a mano:"
+        echo "  nvidia-smi"
+        echo "  switcherooctl list"
+        echo '  nvidia-run glxinfo | grep "OpenGL renderer"'
+    fi
 }
 
 main() {
+    parse_args "$@"
     require_not_root
     require_fedora
 
@@ -379,26 +531,41 @@ main() {
     check_secure_boot
     ensure_sudo
 
-    ensure_rpmfusion || exit 1
-    install_nvidia_stack || exit 1
-    install_hybrid_tools || exit 1
-    install_nvidia_run
+    if [[ "$MODE" == "install" ]]; then
+        ensure_rpmfusion || exit 1
+        install_nvidia_stack || exit 1
+        install_hybrid_tools || exit 1
+        install_nvidia_run
+    fi
 
     show_gpu_topology
 
-    local offload_ok=0
-    verify_prime_offload || offload_ok=1
+    local verify_rc=0
+    verify_prime_offload || verify_rc=$?
 
     final_summary
 
     echo
-    if [[ "$offload_ok" -eq 0 ]]; then
+    if [[ "$verify_rc" -eq 0 ]]; then
         log_ok "Instalación y verificación completadas."
         exit 0
     fi
 
-    log_info "Instalación completada, pero la verificación de offload no se pudo confirmar."
-    log_info "Se recomienda reiniciar y repetir las pruebas manuales."
+    if [[ "$MODE" == "verify" ]]; then
+        log_err "Verificación no superada; revisa los detalles anteriores."
+        exit 3
+    fi
+
+    if [[ "$verify_rc" -eq 2 ]]; then
+        if [[ "$REBOOT_PENDING" -eq 1 ]]; then
+            log_info "Instalación completada. Falta reiniciar para activar el driver NVIDIA."
+        else
+            log_warn "Instalación completada, pero la verificación gráfica no se pudo ejecutar desde este terminal."
+        fi
+        exit 0
+    fi
+
+    log_err "El driver NVIDIA no funciona y ningún reinicio pendiente lo explica; revisa el diagnóstico anterior."
     exit 3
 }
 
