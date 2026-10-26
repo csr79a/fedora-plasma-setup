@@ -12,7 +12,6 @@
 #   - akmod-nvidia
 #   - xorg-x11-drv-nvidia-cuda (aporta nvidia-smi y las librerías CUDA)
 #   - libva-nvidia-driver
-#   - switcheroo-control / switcherooctl
 #   - glx-utils / glxinfo
 #   - wrapper nvidia-run para PRIME Render Offload
 #   - verificación funcional del renderizado OpenGL
@@ -249,28 +248,12 @@ install_nvidia_stack() {
     fi
 }
 
-install_hybrid_tools() {
-    log_step "3/7 · Preparando GPU híbrida y diagnóstico OpenGL"
+install_gl_tools() {
+    log_step "3/7 · Instalando diagnóstico OpenGL (glx-utils)"
 
-    if ! sudo dnf install -y switcheroo-control glx-utils; then
-        log_err "No se pudieron instalar switcheroo-control y glx-utils."
+    if ! sudo dnf install -y glx-utils; then
+        log_err "No se pudo instalar glx-utils."
         return 1
-    fi
-
-    if systemctl cat switcheroo-control.service &>/dev/null; then
-        if sudo systemctl enable --now switcheroo-control.service; then
-            log_ok "switcheroo-control habilitado"
-        else
-            log_warn "La unidad switcheroo-control.service existe, pero no se pudo habilitar/iniciar."
-        fi
-    else
-        log_warn "No se encontró switcheroo-control.service."
-    fi
-
-    if command -v switcherooctl &>/dev/null; then
-        log_ok "switcherooctl disponible"
-    else
-        log_warn "switcherooctl no está disponible."
     fi
 
     if command -v glxinfo &>/dev/null; then
@@ -385,11 +368,6 @@ show_gpu_topology() {
             diagnose_broken_driver
             ;;
     esac
-
-    if command -v switcherooctl &>/dev/null; then
-        echo
-        switcherooctl list || log_warn "switcherooctl no pudo enumerar las GPU."
-    fi
 }
 
 # Devuelve:
@@ -490,7 +468,6 @@ final_summary() {
     if pkg_installed libva-nvidia-driver; then log_ok "libva-nvidia-driver instalado"; else log_warn "libva-nvidia-driver no está instalado"; fi
 
     if command -v nvidia-smi &>/dev/null; then log_ok "nvidia-smi disponible"; else log_warn "nvidia-smi no disponible"; fi
-    if command -v switcherooctl &>/dev/null; then log_ok "switcherooctl disponible"; else log_warn "switcherooctl no disponible"; fi
     if command -v glxinfo &>/dev/null; then log_ok "glxinfo disponible"; else log_warn "glxinfo no disponible"; fi
     if [[ -x /usr/local/bin/nvidia-run ]]; then log_ok "nvidia-run instalado"; else log_warn "nvidia-run no está instalado"; fi
 
@@ -505,7 +482,6 @@ final_summary() {
         echo
         echo "o comprueba a mano:"
         echo "  nvidia-smi"
-        echo "  switcherooctl list"
         echo '  nvidia-run glxinfo | grep "OpenGL renderer"'
     fi
 }
@@ -534,7 +510,7 @@ main() {
     if [[ "$MODE" == "install" ]]; then
         ensure_rpmfusion || exit 1
         install_nvidia_stack || exit 1
-        install_hybrid_tools || exit 1
+        install_gl_tools || exit 1
         install_nvidia_run
     fi
 
@@ -546,27 +522,31 @@ main() {
     final_summary
 
     echo
+    if [[ "$verify_rc" -eq 1 ]]; then
+        if [[ "$MODE" == "verify" ]]; then
+            log_err "Verificación no superada; revisa los detalles anteriores."
+        else
+            log_err "El driver NVIDIA no funciona y ningún reinicio pendiente lo explica; revisa el diagnóstico anterior."
+        fi
+        exit 3
+    fi
+
+    if [[ "$MODE" == "verify" && "$verify_rc" -ne 0 ]]; then
+        log_err "Verificación no superada; revisa los detalles anteriores."
+        exit 3
+    fi
+
     if [[ "$verify_rc" -eq 0 ]]; then
         log_ok "Instalación y verificación completadas."
         exit 0
     fi
 
-    if [[ "$MODE" == "verify" ]]; then
-        log_err "Verificación no superada; revisa los detalles anteriores."
-        exit 3
+    if [[ "$REBOOT_PENDING" -eq 1 ]]; then
+        log_info "Instalación completada. Falta reiniciar para activar el driver NVIDIA."
+    else
+        log_warn "Instalación completada, pero la verificación gráfica no se pudo ejecutar desde este terminal."
     fi
-
-    if [[ "$verify_rc" -eq 2 ]]; then
-        if [[ "$REBOOT_PENDING" -eq 1 ]]; then
-            log_info "Instalación completada. Falta reiniciar para activar el driver NVIDIA."
-        else
-            log_warn "Instalación completada, pero la verificación gráfica no se pudo ejecutar desde este terminal."
-        fi
-        exit 0
-    fi
-
-    log_err "El driver NVIDIA no funciona y ningún reinicio pendiente lo explica; revisa el diagnóstico anterior."
-    exit 3
+    exit 0
 }
 
 main "$@"
