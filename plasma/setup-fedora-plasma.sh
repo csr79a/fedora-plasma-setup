@@ -30,6 +30,13 @@ log_warn()  { echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*"; }
 log_err()   { echo -e "${COLOR_RED}[FAIL]${COLOR_RESET} $*"; }
 log_step()  { echo -e "\n${COLOR_BLUE}==>${COLOR_RESET} \e[1m$*${COLOR_RESET}"; }
 
+# Fallos acumulados durante la ejecución; se listan en el resumen final.
+FAILURES=()
+record_fail() {
+    FAILURES+=("$1")
+    log_err "$1"
+}
+
 require_fedora() {
     if [[ ! -r /etc/os-release ]]; then
         log_err "No se pudo leer /etc/os-release. No es posible verificar el sistema operativo."
@@ -61,6 +68,13 @@ pkg_installed() {
     rpm -q "$1" &>/dev/null
 }
 
+# Igual que pkg_installed, pero también acepta capacidades virtuales (Provides).
+# Se usa solo para p7zip/p7zip-plugins: en Fedora 45 ya no son paquetes reales,
+# los proveen 7zip / 7zip-standalone, y 'rpm -q p7zip' (solo por nombre) falla.
+cap_installed() {
+    rpm -q --whatprovides "$1" &>/dev/null
+}
+
 configure_dnf_performance() {
     local dnf_conf="/etc/dnf/dnf.conf"
 
@@ -81,20 +95,25 @@ step_base_update() {
     configure_dnf_performance
 
     if ! sudo dnf upgrade --refresh -y; then
-        log_warn "dnf upgrade --refresh falló. Se continúa con el resto del paso, pero la actualización del sistema no quedó confirmada."
+        record_fail "dnf upgrade --refresh falló; la actualización del sistema no quedó confirmada (el script continúa)."
     else
         log_ok "Sistema actualizado correctamente"
     fi
 
+    # p7zip y p7zip-plugins se mantienen por nombre: en Fedora 44 son paquetes reales y en
+    # Fedora 45 dnf los resuelve por Provides hacia 7zip / 7zip-standalone.
     local base_pkgs=(fastfetch unrar p7zip p7zip-plugins papirus-icon-theme)
     local to_install=()
     for pkg in "${base_pkgs[@]}"; do
-        pkg_installed "$pkg" || to_install+=("$pkg")
+        cap_installed "$pkg" || to_install+=("$pkg")
     done
 
     if [[ ${#to_install[@]} -gt 0 ]]; then
-        sudo dnf install -y "${to_install[@]}"
-        log_ok "Paquetes base instalados: ${to_install[*]}"
+        if sudo dnf install -y "${to_install[@]}"; then
+            log_ok "Paquetes base instalados: ${to_install[*]}"
+        else
+            record_fail "No se pudieron instalar los paquetes base: ${to_install[*]}"
+        fi
     else
         log_ok "Paquetes base ya estaban instalados"
     fi
@@ -109,37 +128,58 @@ step_rpmfusion_multimedia() {
     local fedora_ver
     fedora_ver="$(rpm -E %fedora)"
 
+    local rpmfusion_ok=true
     if ! pkg_installed rpmfusion-free-release; then
-        sudo dnf install -y \
-            "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_ver}.noarch.rpm"
+        if ! sudo dnf install -y \
+            "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_ver}.noarch.rpm"; then
+            record_fail "No se pudo instalar rpmfusion-free-release."
+            rpmfusion_ok=false
+        fi
     fi
     if ! pkg_installed rpmfusion-nonfree-release; then
-        sudo dnf install -y \
-            "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_ver}.noarch.rpm"
+        if ! sudo dnf install -y \
+            "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_ver}.noarch.rpm"; then
+            record_fail "No se pudo instalar rpmfusion-nonfree-release."
+            rpmfusion_ok=false
+        fi
+    fi
+    if ! $rpmfusion_ok; then
+        log_warn "RPM Fusion no quedó habilitado; se omiten los pasos multimedia que dependen de él."
+        return
     fi
     log_ok "RPM Fusion (free + nonfree) habilitado"
 
-    sudo dnf update @core -y
+    if ! sudo dnf update @core -y; then
+        record_fail "dnf update @core falló."
+    fi
 
-    sudo dnf install -y rpmfusion-free-appstream-data rpmfusion-nonfree-appstream-data
+    if ! sudo dnf install -y rpmfusion-free-appstream-data rpmfusion-nonfree-appstream-data; then
+        record_fail "No se pudieron instalar los datos AppStream de RPM Fusion."
+    fi
 
     # Swap de ffmpeg-free por ffmpeg completo
     if pkg_installed ffmpeg-free; then
-        sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
-        log_ok "ffmpeg-free reemplazado por ffmpeg completo"
+        if sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing; then
+            log_ok "ffmpeg-free reemplazado por ffmpeg completo"
+        else
+            record_fail "No se pudo reemplazar ffmpeg-free por ffmpeg."
+        fi
     elif pkg_installed ffmpeg; then
         log_ok "ffmpeg completo ya estaba instalado"
     else
-        sudo dnf install -y ffmpeg
+        if ! sudo dnf install -y ffmpeg; then
+            record_fail "No se pudo instalar ffmpeg."
+        fi
     fi
 
-    # Grupo multimedia, excluyendo PackageKit-gstreamer-plugin
-    if sudo dnf group install -y Multimedia \
+    # Grupo multimedia, excluyendo PackageKit-gstreamer-plugin.
+    # Es un grupo oculto: se referencia por su id (minúsculas), no por el nombre "Multimedia".
+    if sudo dnf group install -y multimedia \
         --setopt="install_weak_deps=False" \
         --exclude=PackageKit-gstreamer-plugin; then
         log_ok "Grupo Multimedia instalado"
     else
-        log_warn "No se pudo instalar el grupo Multimedia. El resto del script continúa."
+        record_fail "No se pudo instalar el grupo multimedia (el script continúa)."
     fi
 }
 
@@ -158,8 +198,11 @@ step_cpu_microcode() {
             if pkg_installed microcode_ctl; then
                 log_ok "microcode_ctl ya estaba instalado"
             else
-                sudo dnf install -y microcode_ctl
-                log_ok "microcode_ctl instalado (microcódigo Intel)"
+                if sudo dnf install -y microcode_ctl; then
+                    log_ok "microcode_ctl instalado (microcódigo Intel)"
+                else
+                    record_fail "No se pudo instalar microcode_ctl."
+                fi
             fi
             ;;
         AuthenticAMD)
@@ -171,7 +214,7 @@ step_cpu_microcode() {
             elif sudo dnf install -y linux-firmware; then
                 log_ok "linux-firmware instalado (incluye microcódigo AMD)"
             else
-                log_warn "No se pudo instalar linux-firmware; no se pudo completar este paso para AMD."
+                record_fail "No se pudo instalar linux-firmware; no se completó el microcódigo AMD."
             fi
             ;;
         *)
@@ -186,15 +229,17 @@ step_cpu_microcode() {
 step_gpu_codecs() {
     log_step "4/6 · Detectando GPU e instalando códecs por hardware"
 
+    # Detección por vendor ID PCI (1002=AMD/ATI, 10de=NVIDIA, 8086=Intel).
+    # No se busca por texto: 'ati' aparece en "compatible" y "Corporation".
     local gpu_info
-    gpu_info="$(lspci -nnk | grep -iE 'vga|3d controller' -A2)"
+    gpu_info="$(lspci -nn 2>/dev/null | grep -E 'VGA compatible controller|3D controller|Display controller')"
 
     local has_amd=false
     local has_nvidia=false
     local has_intel=false
-    echo "$gpu_info" | grep -qi 'amd\|ati' && has_amd=true
-    echo "$gpu_info" | grep -qi 'nvidia' && has_nvidia=true
-    echo "$gpu_info" | grep -qi 'intel' && has_intel=true
+    grep -q '\[1002:' <<<"$gpu_info" && has_amd=true
+    grep -q '\[10de:' <<<"$gpu_info" && has_nvidia=true
+    grep -q '\[8086:' <<<"$gpu_info" && has_intel=true
 
     if $has_amd; then
         log_info "GPU AMD detectada → instalando códecs VAAPI"
@@ -208,7 +253,10 @@ step_gpu_codecs() {
         log_info "No se pudo identificar una GPU AMD, Intel o NVIDIA. Se omite este paso."
         return
     fi
-    sudo dnf install -y mesa-va-drivers-freeworld
+    if ! sudo dnf install -y mesa-va-drivers-freeworld; then
+        record_fail "No se pudo instalar mesa-va-drivers-freeworld. Suele deberse a un desfase de versión de Mesa entre Fedora y RPM Fusion; reintenta cuando ambos repos se sincronicen."
+        return
+    fi
     if sudo dnf install -y mesa-va-drivers-freeworld.i686; then
         log_ok "Variante i686 de los códecs AMD instalada"
     else
@@ -289,7 +337,9 @@ step_summary() {
     log_step "Resumen final"
     echo "Estado de componentes principales:"
     for pkg in fastfetch unrar p7zip p7zip-plugins papirus-icon-theme ffmpeg; do
-        if pkg_installed "$pkg"; then
+        local check=pkg_installed
+        [[ "$pkg" == p7zip || "$pkg" == p7zip-plugins ]] && check=cap_installed
+        if "$check" "$pkg"; then
             echo "  - $pkg: instalado"
         else
             echo "  - $pkg: no instalado"
@@ -305,6 +355,17 @@ step_summary() {
     echo "  - Para ASUS/ROG, ejecutá asus/setup-asusctl.sh por separado."
     echo "  - Reiniciá el equipo si instalaste componentes que lo requieran."
     echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
+
+    if [[ ${#FAILURES[@]} -gt 0 ]]; then
+        echo
+        log_err "El script terminó con ${#FAILURES[@]} fallo(s):"
+        local f
+        for f in "${FAILURES[@]}"; do
+            echo "  - $f"
+        done
+        return 1
+    fi
+    log_ok "El script terminó sin errores."
 }
 
 # ---------------------------------------------------------------------------
