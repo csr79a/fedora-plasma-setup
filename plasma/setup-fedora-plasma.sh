@@ -2,16 +2,29 @@
 #
 # setup-fedora-plasma.sh
 #
-# Script de configuración inicial para Fedora Workstation / KDE Plasma spin.
-# Deja el equipo listo con configuración general, multimedia, códecs AMD,
+# Script base de configuración inicial para Fedora KDE Plasma. Deja el equipo
+# listo con configuración general, multimedia, códecs por hardware (AMD/Intel),
 # microcódigo de CPU y Flathub. NVIDIA y ASUS son componentes independientes.
 #
 # Uso:
 #   chmod +x setup-fedora-plasma.sh
 #   ./setup-fedora-plasma.sh
 #
+# Opcional (primeros días de una versión nueva de Fedora, cuando RPM Fusion
+# va por delante de los repos de Fedora y freeworld no se puede instalar):
+#   MESA_FROM_TESTING=1 ./setup-fedora-plasma.sh
+#
 # Repite ejecución: el script está diseñado para poder ejecutarse varias veces sin
 # romper configuraciones existentes; cada paso comprueba el estado cuando corresponde.
+#
+# Avisos y fallos:
+#   aviso  algo opcional o informativo no se pudo hacer (no cambia el resultado).
+#   fallo  algo que el script debía dejar instalado o configurado no quedó así.
+#
+# Códigos de salida:
+#   0  correcto, con o sin avisos
+#   1  hubo al menos un fallo (se listan en el resumen final), o el sistema no
+#      es Fedora con KDE Plasma
 
 set -uo pipefail
 
@@ -24,18 +37,23 @@ COLOR_YELLOW="\e[33m"
 COLOR_RED="\e[31m"
 COLOR_BLUE="\e[34m"
 
+# Avisos y fallos se acumulan aquí para mostrarlos en el resumen final.
+WARNINGS=()
+FAILURES=()
+
+# Los rellena detect_gpu_vendors (paso 4) según las GPU presentes.
+GPU_AMD=false
+GPU_INTEL=false
+GPU_NVIDIA=false
+
 log_info()  { echo -e "${COLOR_BLUE}[INFO]${COLOR_RESET} $*"; }
 log_ok()    { echo -e "${COLOR_GREEN}[ OK ]${COLOR_RESET} $*"; }
-log_warn()  { echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*"; }
+log_warn()  { echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*"; WARNINGS+=("$*"); }
 log_err()   { echo -e "${COLOR_RED}[FAIL]${COLOR_RESET} $*"; }
 log_step()  { echo -e "\n${COLOR_BLUE}==>${COLOR_RESET} \e[1m$*${COLOR_RESET}"; }
 
-# Fallos acumulados durante la ejecución; se listan en el resumen final.
-FAILURES=()
-record_fail() {
-    FAILURES+=("$1")
-    log_err "$1"
-}
+# Fallo real: se muestra y se acumula; el script termina con código 1.
+record_fail() { log_err "$*"; FAILURES+=("$*"); }
 
 require_fedora() {
     if [[ ! -r /etc/os-release ]]; then
@@ -49,15 +67,16 @@ require_fedora() {
         log_err "Este script está diseñado para Fedora. Sistema detectado: ID=${ID:-desconocido}."
         exit 1
     fi
+    log_info "Fedora ${VERSION_ID:-?} detectado"
 }
 
 require_root_privileges() {
     if [[ "${EUID}" -eq 0 ]]; then
-        log_err "No corras este script directamente como root. Ejecutalo como tu usuario normal; se te pedirá la contraseña de sudo cuando haga falta."
+        log_err "No corras este script directamente como root. Ejecútalo como tu usuario normal; se te pedirá la contraseña de sudo cuando haga falta."
         exit 1
     fi
     if ! command -v sudo &>/dev/null; then
-        log_err "No se encontró 'sudo'. Instalalo o corré este script con un método equivalente."
+        log_err "No se encontró 'sudo'. Instálalo o corre este script con un método equivalente."
         exit 1
     fi
     # Fuerza a pedir la contraseña una sola vez al principio
@@ -68,12 +87,41 @@ pkg_installed() {
     rpm -q "$1" &>/dev/null
 }
 
-# Igual que pkg_installed, pero también acepta capacidades virtuales (Provides).
-# Se usa solo para p7zip/p7zip-plugins: en Fedora 45 ya no son paquetes reales,
-# los proveen 7zip / 7zip-standalone, y 'rpm -q p7zip' (solo por nombre) falla.
-cap_installed() {
-    rpm -q --whatprovides "$1" &>/dev/null
+# Este proyecto es solo para Fedora con KDE Plasma. Se comprueba por paquete (no por
+# XDG_CURRENT_DESKTOP) para que funcione también por SSH o desde la GUI.
+require_plasma() {
+    if ! pkg_installed plasma-desktop; then
+        log_err "No se encontró plasma-desktop. Este script es exclusivo para Fedora KDE Plasma."
+        exit 1
+    fi
 }
+
+# Instala un paquete y VERIFICA con rpm -q que quedó instalado.
+# No depende solo del código de salida de dnf.
+# Uso: install_verified <paquete> [opciones extra de dnf...]   (si falla: fallo)
+#      install_optional <paquete> [opciones extra de dnf...]   (si falla: aviso)
+_install_checked() {
+    local severity="$1" pkg="$2"
+    shift 2
+    if pkg_installed "$pkg"; then
+        log_ok "$pkg ya estaba instalado"
+        return 0
+    fi
+    sudo dnf install -y "$@" "$pkg"
+    if pkg_installed "$pkg"; then
+        log_ok "$pkg instalado"
+        return 0
+    fi
+    if [[ "$severity" == "fail" ]]; then
+        record_fail "No se pudo instalar $pkg."
+    else
+        log_warn "No se pudo instalar $pkg (opcional)."
+    fi
+    return 1
+}
+
+install_verified() { _install_checked fail "$@"; }
+install_optional() { _install_checked warn "$@"; }
 
 configure_dnf_performance() {
     local dnf_conf="/etc/dnf/dnf.conf"
@@ -86,13 +134,32 @@ configure_dnf_performance() {
     fi
 }
 
+# Versiones anteriores de este script fijaban vm.swappiness=60, lo que pisa el
+# ajuste que Fedora ya trae para zram. Si el archivo lo creó este script, se retira.
+remove_legacy_swappiness() {
+    local sysctl_file="/etc/sysctl.d/99-swappiness.conf"
+    local marker="gestionada por setup-fedora-plasma.sh"
+
+    [[ -f "$sysctl_file" ]] || return 0
+    if grep -qF "$marker" "$sysctl_file"; then
+        if sudo rm -f "$sysctl_file"; then
+            log_ok "Eliminado ${sysctl_file} (creado por una versión anterior); se aplicará el valor por defecto de Fedora tras reiniciar"
+        else
+            log_warn "No se pudo eliminar ${sysctl_file}."
+        fi
+    else
+        log_info "${sysctl_file} existe pero no es de este script; se conserva."
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # 1. Base del sistema
 # ---------------------------------------------------------------------------
 step_base_update() {
-    log_step "1/6 · Actualizando el sistema e instalando paquetes base"
+    log_step "1/5 · Actualizando el sistema e instalando paquetes base"
 
     configure_dnf_performance
+    remove_legacy_swappiness
 
     if ! sudo dnf upgrade --refresh -y; then
         record_fail "dnf upgrade --refresh falló; la actualización del sistema no quedó confirmada (el script continúa)."
@@ -100,94 +167,96 @@ step_base_update() {
         log_ok "Sistema actualizado correctamente"
     fi
 
-    # p7zip y p7zip-plugins se mantienen por nombre: en Fedora 44 son paquetes reales y en
-    # Fedora 45 dnf los resuelve por Provides hacia 7zip / 7zip-standalone.
-    local base_pkgs=(fastfetch unrar p7zip p7zip-plugins papirus-icon-theme)
-    local to_install=()
-    for pkg in "${base_pkgs[@]}"; do
-        cap_installed "$pkg" || to_install+=("$pkg")
+    # p7zip fue retirado de Fedora; el paquete actual es 7zip.
+    # unrar está en RPM Fusion nonfree, así que se instala en el paso 2.
+    local pkg
+    for pkg in fastfetch 7zip; do
+        install_verified "$pkg" || true
     done
 
-    if [[ ${#to_install[@]} -gt 0 ]]; then
-        if sudo dnf install -y "${to_install[@]}"; then
-            log_ok "Paquetes base instalados: ${to_install[*]}"
+    # Opcionales: solo se instalan si existen en los repos activos.
+    for pkg in 7zip-plugins papirus-icon-theme; do
+        if pkg_installed "$pkg"; then
+            log_ok "$pkg ya estaba instalado"
+        elif [[ -n "$(dnf repoquery --available --qf '%{name}' "$pkg" 2>/dev/null)" ]]; then
+            install_optional "$pkg" || true
         else
-            record_fail "No se pudieron instalar los paquetes base: ${to_install[*]}"
+            log_info "$pkg no existe en los repositorios activos; se omite (opcional)."
         fi
-    else
-        log_ok "Paquetes base ya estaban instalados"
-    fi
+    done
 }
 
 # ---------------------------------------------------------------------------
 # 2. RPM Fusion + multimedia
 # ---------------------------------------------------------------------------
+install_multimedia_group() {
+    # El ID del grupo ha cambiado entre versiones de Fedora/dnf5, así que se
+    # prueban varios nombres en orden.
+    local candidates=(multimedia sound-and-video Multimedia)
+    local g
+    for g in "${candidates[@]}"; do
+        if sudo dnf group install -y "$g" \
+            --setopt="install_weak_deps=False" \
+            --exclude=PackageKit-gstreamer-plugin; then
+            log_ok "Grupo '$g' instalado"
+            return 0
+        fi
+    done
+    record_fail "No se pudo instalar ningún grupo multimedia (probados: ${candidates[*]}). Mira el nombre actual con: dnf group list --hidden | grep -i -E 'multimedia|sound'"
+    return 1
+}
+
 step_rpmfusion_multimedia() {
-    log_step "2/6 · Habilitando RPM Fusion y configurando multimedia"
+    log_step "2/5 · Habilitando RPM Fusion y configurando multimedia"
 
     local fedora_ver
     fedora_ver="$(rpm -E %fedora)"
 
-    local rpmfusion_ok=true
     if ! pkg_installed rpmfusion-free-release; then
-        if ! sudo dnf install -y \
-            "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_ver}.noarch.rpm"; then
-            record_fail "No se pudo instalar rpmfusion-free-release."
-            rpmfusion_ok=false
-        fi
+        sudo dnf install -y \
+            "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_ver}.noarch.rpm"
     fi
     if ! pkg_installed rpmfusion-nonfree-release; then
-        if ! sudo dnf install -y \
-            "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_ver}.noarch.rpm"; then
-            record_fail "No se pudo instalar rpmfusion-nonfree-release."
-            rpmfusion_ok=false
-        fi
+        sudo dnf install -y \
+            "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_ver}.noarch.rpm"
     fi
-    if ! $rpmfusion_ok; then
-        log_warn "RPM Fusion no quedó habilitado; se omiten los pasos multimedia que dependen de él."
-        return
+    if pkg_installed rpmfusion-free-release && pkg_installed rpmfusion-nonfree-release; then
+        log_ok "RPM Fusion (free + nonfree) habilitado"
+    else
+        record_fail "RPM Fusion no quedó instalado por completo (free o nonfree falta); se omiten unrar, ffmpeg completo y el grupo multimedia."
+        return 1
     fi
-    log_ok "RPM Fusion (free + nonfree) habilitado"
 
     if ! sudo dnf update @core -y; then
         record_fail "dnf update @core falló."
     fi
 
     if ! sudo dnf install -y rpmfusion-free-appstream-data rpmfusion-nonfree-appstream-data; then
-        record_fail "No se pudieron instalar los datos AppStream de RPM Fusion."
+        log_warn "No se pudieron instalar los datos AppStream de RPM Fusion (solo afectan a la tienda de software)."
     fi
+
+    install_verified unrar || true
 
     # Swap de ffmpeg-free por ffmpeg completo
     if pkg_installed ffmpeg-free; then
-        if sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing; then
-            log_ok "ffmpeg-free reemplazado por ffmpeg completo"
-        else
-            record_fail "No se pudo reemplazar ffmpeg-free por ffmpeg."
-        fi
-    elif pkg_installed ffmpeg; then
-        log_ok "ffmpeg completo ya estaba instalado"
+        sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing
+    elif ! pkg_installed ffmpeg; then
+        sudo dnf install -y ffmpeg
+    fi
+    if pkg_installed ffmpeg && ! pkg_installed ffmpeg-free; then
+        log_ok "ffmpeg completo instalado"
     else
-        if ! sudo dnf install -y ffmpeg; then
-            record_fail "No se pudo instalar ffmpeg."
-        fi
+        record_fail "ffmpeg completo no quedó instalado correctamente (ffmpeg-free sigue presente o falta ffmpeg)."
     fi
 
-    # Grupo multimedia, excluyendo PackageKit-gstreamer-plugin.
-    # Es un grupo oculto: se referencia por su id (minúsculas), no por el nombre "Multimedia".
-    if sudo dnf group install -y multimedia \
-        --setopt="install_weak_deps=False" \
-        --exclude=PackageKit-gstreamer-plugin; then
-        log_ok "Grupo Multimedia instalado"
-    else
-        record_fail "No se pudo instalar el grupo multimedia (el script continúa)."
-    fi
+    install_multimedia_group || true
 }
 
 # ---------------------------------------------------------------------------
 # 3. Microcódigo de CPU (detección automática Intel/AMD)
 # ---------------------------------------------------------------------------
 step_cpu_microcode() {
-    log_step "3/6 · Detectando CPU e instalando microcódigo"
+    log_step "3/5 · Detectando CPU e instalando microcódigo"
 
     local vendor
     vendor="$(grep -m1 'vendor_id' /proc/cpuinfo | awk '{print $NF}')"
@@ -195,27 +264,13 @@ step_cpu_microcode() {
     case "$vendor" in
         GenuineIntel)
             log_info "CPU Intel detectada"
-            if pkg_installed microcode_ctl; then
-                log_ok "microcode_ctl ya estaba instalado"
-            else
-                if sudo dnf install -y microcode_ctl; then
-                    log_ok "microcode_ctl instalado (microcódigo Intel)"
-                else
-                    record_fail "No se pudo instalar microcode_ctl."
-                fi
-            fi
+            install_verified microcode_ctl || true
             ;;
         AuthenticAMD)
             log_info "CPU AMD detectada"
             # En Fedora el microcódigo AMD viene dentro de linux-firmware,
             # no como paquete separado (a diferencia de Debian con amd64-microcode).
-            if pkg_installed linux-firmware; then
-                log_ok "linux-firmware ya estaba instalado (incluye microcódigo AMD)"
-            elif sudo dnf install -y linux-firmware; then
-                log_ok "linux-firmware instalado (incluye microcódigo AMD)"
-            else
-                record_fail "No se pudo instalar linux-firmware; no se completó el microcódigo AMD."
-            fi
+            install_verified linux-firmware || true
             ;;
         *)
             log_warn "No se pudo determinar el fabricante de la CPU (vendor_id='${vendor}'). Se omite este paso."
@@ -224,148 +279,218 @@ step_cpu_microcode() {
 }
 
 # ---------------------------------------------------------------------------
-# 4. GPU: códecs AMD
+# 4. GPU: códecs por hardware (AMD, Intel o NVIDIA; también equipos híbridos)
 # ---------------------------------------------------------------------------
+# Clasifica las GPU a partir de la salida de 'lspci -nn' usando la clase PCI
+# (03xx = controlador de pantalla) y el ID de fabricante (AMD/ATI=1002,
+# NVIDIA=10de, Intel=8086). No depende del texto del nombre del dispositivo.
+detect_gpu_vendors() {
+    local gpus
+    GPU_AMD=false
+    GPU_INTEL=false
+    GPU_NVIDIA=false
+
+    gpus="$(grep -iE '\[03[0-9a-f]{2}\]' <<<"$1")"
+    grep -qiE '\[1002:[0-9a-f]{4}\]' <<<"$gpus" && GPU_AMD=true
+    grep -qiE '\[8086:[0-9a-f]{4}\]' <<<"$gpus" && GPU_INTEL=true
+    grep -qiE '\[10de:[0-9a-f]{4}\]' <<<"$gpus" && GPU_NVIDIA=true
+    return 0
+}
+
+freeworld_hint() {
+    log_info "Si el error menciona mesa-filesystem, RPM Fusion va por delante de Fedora (pasa en los primeros días de una versión nueva)."
+    log_info "Opciones: reintentar en 1-2 días, o ejecutar el script con MESA_FROM_TESTING=1 para traer Mesa desde updates-testing."
+}
+
+install_amd_codecs() {
+    log_info "GPU AMD detectada → instalando códecs VAAPI"
+
+    # Opcional: traer Mesa desde updates-testing para alinearla con RPM Fusion.
+    if [[ "${MESA_FROM_TESTING:-0}" == "1" ]]; then
+        log_info "MESA_FROM_TESTING=1 → actualizando Mesa desde updates-testing"
+        sudo dnf upgrade -y --enablerepo=updates-testing 'mesa-*' \
+            || log_warn "No se pudo actualizar Mesa desde updates-testing."
+    fi
+
+    # mesa-va-drivers-freeworld sustituye a mesa-va-drivers, por eso --allowerasing.
+    if ! install_verified mesa-va-drivers-freeworld --allowerasing; then
+        freeworld_hint
+        return 1
+    fi
+
+    # Variante i686 (Steam, Wine 32 bits). No es crítica.
+    if ! install_optional mesa-va-drivers-freeworld.i686 --allowerasing; then
+        log_info "La variante i686 solo hace falta para aplicaciones de 32 bits (Steam/Wine)."
+    fi
+    return 0
+}
+
+install_intel_codecs() {
+    log_info "GPU Intel detectada → instalando intel-media-driver (VA-API)"
+    if install_verified intel-media-driver; then
+        return 0
+    fi
+    log_info "En GPU Intel muy antiguas puede hacer falta libva-intel-driver en lugar de intel-media-driver."
+    return 1
+}
+
+verify_vaapi() {
+    # vainfo sirve para comprobar H.264/HEVC por hardware.
+    install_optional libva-utils || true
+
+    if ! command -v vainfo &>/dev/null; then
+        log_info "vainfo no está instalado (paquete libva-utils); no se pudo verificar H.264/HEVC."
+        return 0
+    fi
+    # Se captura la salida antes de filtrarla: con 'pipefail', 'vainfo | grep -q'
+    # puede dar un falso error si grep cierra la tubería antes de que vainfo termine.
+    local out
+    out="$(vainfo 2>/dev/null)"
+    if grep -qiE 'H264|HEVC' <<<"$out"; then
+        log_ok "VA-API expone H.264/HEVC por hardware"
+    else
+        log_warn "Los códecs están instalados pero vainfo no muestra H.264/HEVC. Reinicia la sesión y vuelve a comprobar."
+    fi
+}
+
 step_gpu_codecs() {
-    log_step "4/6 · Detectando GPU e instalando códecs por hardware"
+    log_step "4/5 · Detectando GPU e instalando códecs por hardware"
 
-    # Detección por vendor ID PCI (1002=AMD/ATI, 10de=NVIDIA, 8086=Intel).
-    # No se busca por texto: 'ati' aparece en "compatible" y "Corporation".
-    local gpu_info
-    gpu_info="$(lspci -nn 2>/dev/null | grep -E 'VGA compatible controller|3D controller|Display controller')"
+    if ! command -v lspci &>/dev/null; then
+        log_warn "lspci no está instalado (paquete pciutils); no se puede detectar la GPU. Se omite este paso."
+        return 0
+    fi
 
-    local has_amd=false
-    local has_nvidia=false
-    local has_intel=false
-    grep -q '\[1002:' <<<"$gpu_info" && has_amd=true
-    grep -q '\[10de:' <<<"$gpu_info" && has_nvidia=true
-    grep -q '\[8086:' <<<"$gpu_info" && has_intel=true
+    detect_gpu_vendors "$(lspci -nn 2>/dev/null)"
 
-    if $has_amd; then
-        log_info "GPU AMD detectada → instalando códecs VAAPI"
-    elif $has_nvidia; then
+    if ! $GPU_AMD && ! $GPU_INTEL && ! $GPU_NVIDIA; then
+        log_info "No se detectó una GPU AMD, Intel ni NVIDIA (¿máquina virtual?). Se omite este paso."
+        return 0
+    fi
+
+    # Las tres comprobaciones son independientes: un portátil híbrido
+    # (Intel+NVIDIA o AMD+NVIDIA) recibe los pasos de cada GPU que tenga.
+    local vaapi_ok=false
+
+    if $GPU_NVIDIA; then
         log_info "GPU NVIDIA detectada. Sus componentes se gestionan desde nvidia/setup-nvidia.sh."
-        return
-    elif $has_intel; then
-        log_info "GPU Intel detectada. Este paso de códecs AMD no aplica."
-        return
-    else
-        log_info "No se pudo identificar una GPU AMD, Intel o NVIDIA. Se omite este paso."
-        return
     fi
-    if ! sudo dnf install -y mesa-va-drivers-freeworld; then
-        record_fail "No se pudo instalar mesa-va-drivers-freeworld. Suele deberse a un desfase de versión de Mesa entre Fedora y RPM Fusion; reintenta cuando ambos repos se sincronicen."
-        return
+    if $GPU_INTEL; then
+        install_intel_codecs && vaapi_ok=true
     fi
-    if sudo dnf install -y mesa-va-drivers-freeworld.i686; then
-        log_ok "Variante i686 de los códecs AMD instalada"
-    else
-        local i686_query
-        local i686_rc
-        i686_query="$(dnf repoquery --available --qf '%{name}' mesa-va-drivers-freeworld.i686 2>&1)"
-        i686_rc=$?
-        if [[ "$i686_rc" -ne 0 ]]; then
-            log_warn "No se pudo comprobar la disponibilidad de mesa-va-drivers-freeworld.i686; se omite la variante i686."
-        elif [[ -z "$i686_query" ]]; then
-            log_warn "La variante i686 de mesa-va-drivers-freeworld no está disponible en los repositorios activos; se omite (no es crítico)."
-        else
-            log_warn "La instalación de mesa-va-drivers-freeworld.i686 falló aunque el paquete está disponible; se omite (no es crítico)."
-        fi
+    if $GPU_AMD; then
+        install_amd_codecs && vaapi_ok=true
     fi
-    log_ok "Códecs AMD (mesa-va-drivers-freeworld) configurados"
+    if $vaapi_ok; then
+        verify_vaapi
+    fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
-# 5. Swappiness
-# ---------------------------------------------------------------------------
-step_swappiness() {
-    log_step "5/6 · Ajustando swappiness"
-
-    local sysctl_file="/etc/sysctl.d/99-swappiness.conf"
-    local marker="# Configuración de swappiness gestionada por setup-fedora-plasma.sh"
-
-    # 60 coincide con el valor predeterminado habitual de Fedora y evita
-    # forzar swap en disco sin que este script configure zram.
-    # Si el usuario ya tiene este archivo, no se sobrescribe silenciosamente.
-    if [[ -f "$sysctl_file" ]]; then
-        if grep -qF "$marker" "$sysctl_file" && grep -qE '^vm\.swappiness=60$' "$sysctl_file"; then
-            sudo sysctl --system >/dev/null
-            log_ok "vm.swappiness=60 ya estaba configurado por este script"
-        else
-            log_warn "Ya existe ${sysctl_file} con contenido ajeno a este script; no se sobrescribe. Se conserva la configuración existente."
-        fi
-        return
-    fi
-
-    {
-        echo "$marker"
-        echo "vm.swappiness=60"
-    } | sudo tee "$sysctl_file" >/dev/null
-    sudo sysctl --system >/dev/null
-    log_ok "vm.swappiness=60 aplicado (${sysctl_file})"
-}
-
-# ---------------------------------------------------------------------------
-# 6. Flatpak: quitar remoto de Fedora, dejar solo Flathub
+# 5. Flatpak: quitar remoto de Fedora, dejar solo Flathub
 # ---------------------------------------------------------------------------
 step_flatpak_flathub() {
-    log_step "6/6 · Configurando Flatpak (solo Flathub)"
+    log_step "5/5 · Configurando Flatpak (solo Flathub)"
 
     if ! command -v flatpak &>/dev/null; then
-        log_warn "Flatpak no está instalado; no se puede configurar Flathub."
+        record_fail "Flatpak no está instalado; no se puede configurar Flathub."
         return
     fi
 
-    if flatpak remote-list | grep -q '^fedora$'; then
-        flatpak remote-delete fedora --force
-        log_ok "Remoto 'fedora' de Flatpak eliminado"
+    # 'remote-list' separa columnas con tabuladores; se pide solo la columna name.
+    if flatpak remotes --columns=name | grep -qx 'fedora'; then
+        if flatpak remote-delete fedora --force; then
+            log_ok "Remoto 'fedora' de Flatpak eliminado"
+        else
+            log_warn "No se pudo eliminar el remoto 'fedora' de Flatpak."
+        fi
     else
         log_ok "El remoto 'fedora' ya no estaba presente"
     fi
 
     if flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo; then
-        log_ok "Flathub configurado como único remoto Flatpak"
+        log_ok "Flathub configurado como remoto Flatpak"
     else
-        log_warn "No se pudo configurar Flathub."
+        record_fail "No se pudo configurar Flathub."
     fi
 }
 
 # ---------------------------------------------------------------------------
-# Resumen final
+# Resumen final (comprueba el estado real, no solo códigos de salida)
 # ---------------------------------------------------------------------------
 step_summary() {
     log_step "Resumen final"
     echo "Estado de componentes principales:"
-    for pkg in fastfetch unrar p7zip p7zip-plugins papirus-icon-theme ffmpeg; do
-        local check=pkg_installed
-        [[ "$pkg" == p7zip || "$pkg" == p7zip-plugins ]] && check=cap_installed
-        if "$check" "$pkg"; then
+
+    local pkg
+    local summary_pkgs=(fastfetch unrar 7zip)
+    for pkg in "${summary_pkgs[@]}"; do
+        if pkg_installed "$pkg"; then
             echo "  - $pkg: instalado"
         else
-            echo "  - $pkg: no instalado"
+            echo "  - $pkg: NO instalado"
         fi
     done
-    if command -v flatpak &>/dev/null && flatpak remote-list | grep -q '^flathub[[:space:]]'; then
+
+    if pkg_installed ffmpeg && ! pkg_installed ffmpeg-free; then
+        echo "  - ffmpeg: completo instalado"
+    else
+        echo "  - ffmpeg: NO es la versión completa"
+    fi
+
+    if $GPU_AMD; then
+        if pkg_installed mesa-va-drivers-freeworld; then
+            echo "  - mesa-va-drivers-freeworld: instalado"
+        else
+            echo "  - mesa-va-drivers-freeworld: NO instalado (sin H.264/HEVC por hardware)"
+        fi
+    fi
+
+    if $GPU_INTEL; then
+        if pkg_installed intel-media-driver; then
+            echo "  - intel-media-driver: instalado"
+        else
+            echo "  - intel-media-driver: NO instalado (sin H.264/HEVC por hardware)"
+        fi
+    fi
+
+    if command -v flatpak &>/dev/null && flatpak remotes --columns=name | grep -qx 'flathub'; then
         echo "  - Flathub: configurado"
     else
         echo "  - Flathub: no confirmado"
     fi
-    echo "Recomendaciones:"
-    echo "  - Para NVIDIA, ejecutá nvidia/setup-nvidia.sh por separado."
-    echo "  - Para ASUS/ROG, ejecutá asus/setup-asusctl.sh por separado."
-    echo "  - Reiniciá el equipo si instalaste componentes que lo requieran."
-    echo "  - Para quitar apps de KDE que no uses, corré cleanup-fedora-plasma.sh por separado."
 
-    if [[ ${#FAILURES[@]} -gt 0 ]]; then
+    echo "Recomendaciones:"
+    echo "  - Para NVIDIA, ejecuta nvidia/setup-nvidia.sh por separado."
+    echo "  - Para ASUS/ROG, ejecuta asus/setup-asusctl.sh por separado."
+    echo "  - Para quitar apps de KDE que no uses, corre cleanup-fedora-plasma.sh por separado."
+    echo "  - Reinicia el equipo si instalaste componentes que lo requieran."
+
+    local w f
+    if [[ ${#WARNINGS[@]} -gt 0 ]]; then
         echo
-        log_err "El script terminó con ${#FAILURES[@]} fallo(s):"
-        local f
+        echo -e "${COLOR_YELLOW}Avisos (${#WARNINGS[@]}):${COLOR_RESET}"
+        for w in "${WARNINGS[@]}"; do
+            echo "  - $w"
+        done
+    fi
+
+    echo
+    if [[ ${#FAILURES[@]} -gt 0 ]]; then
+        echo -e "${COLOR_RED}El script terminó con ${#FAILURES[@]} fallo(s):${COLOR_RESET}"
         for f in "${FAILURES[@]}"; do
             echo "  - $f"
         done
         return 1
     fi
-    log_ok "El script terminó sin errores."
+
+    if [[ ${#WARNINGS[@]} -eq 0 ]]; then
+        log_ok "El script terminó sin errores ni avisos."
+    else
+        log_ok "El script terminó sin errores (solo avisos)."
+    fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -374,13 +499,19 @@ step_summary() {
 main() {
     require_fedora
     require_root_privileges
+    require_plasma
     step_base_update
     step_rpmfusion_multimedia
     step_cpu_microcode
     step_gpu_codecs
-    step_swappiness
     step_flatpak_flathub
     step_summary
+
+    # Código de salida 1 si hubo fallos reales (los avisos no cuentan).
+    return $?
 }
 
-main "$@"
+# Solo ejecuta main si el archivo se lanza directamente (no si se hace 'source').
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
